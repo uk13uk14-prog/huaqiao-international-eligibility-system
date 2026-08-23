@@ -1,0 +1,9 @@
+{
+  "appId": "com.huaqiao.eligibility",
+  "appName": "华侨生国际生资格判定",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

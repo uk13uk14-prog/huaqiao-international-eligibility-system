@@ -1,0 +1,221 @@
+/* Softer light canvas + dark layout（与 PC 稳定版主题策略一致：html.dark + Element 暗色变量） */
+
+body {
+  background: #e4eaf4;
+  color: #14213d;
+}
+
+.auth-page {
+  position: relative;
+  background: #e8edf5;
+}
+
+.auth-theme-bar {
+  position: absolute;
+  top: 18px;
+  right: min(7vw, 72px);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+}
+
+.topbar {
+  background: #eef2f8;
+  border-bottom: 1px solid #c5d0e3;
+}
+
+.sidebar {
+  background: #eef2f8;
+  border-right: 1px solid #c5d0e3;
+}
+
+.page {
+  background: #f6f8fc;
+  border: 1px solid #d1dae8;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+}
+
+.feature-list span {
+  background: #e2e8f4;
+  color: #1e293b;
+}
+
+.filter-panel {
+  background: #e8edf6;
+  border-color: #c5d0e3;
+}
+
+.answer,
+.result-panel {
+  background: #eef2f8;
+  border-color: #c5d0e3;
+}
+
+.mini-card,
+.law-mini article {
+  background: #fafbfd;
+}
+
+.contact-box,
+.payment-box {
+  background: #eef2f8;
+}
+
+.law-full {
+  background: #faf8f3;
+}
+
+.policy-card {
+  background: #faf8f3;
+}
+
+html.dark body {
+  background: #0b1120;
+  color: #e2e8f0;
+}
+
+html.dark .auth-page {
+  background: #111827;
+}
+
+html.dark .topbar {
+  background: #1e293b;
+  border-bottom-color: #334155;
+}
+
+html.dark .topbar h1 {
+  color: #f1f5f9;
+}
+
+html.dark .sidebar {
+  background: #1e293b;
+  border-right-color: #334155;
+}
+
+html.dark .el-menu {
+  background: transparent;
+  border-right: none;
+}
+
+html.dark .page {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .section-head h2 {
+  color: #f8fafc;
+}
+
+html.dark .muted {
+  color: #94a3b8;
+}
+
+html.dark .feature-list span {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .filter-panel {
+  background: #0f172a;
+  border-color: #475569;
+}
+
+html.dark .answer,
+html.dark .result-panel {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .mini-card,
+html.dark .law-mini article {
+  background: #0f172a;
+  border-color: #475569;
+  color: #e2e8f0;
+}
+
+html.dark .law-full {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+html.dark .law-full-item {
+  border-color: #334155;
+}
+
+html.dark .law-full-item h3 {
+  color: #93c5fd;
+}
+
+html.dark .law-full-item p {
+  color: #cbd5e1;
+}
+
+html.dark .policy-card {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+
+html.dark .contact-box,
+html.dark .payment-box {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+html.dark .qr-box {
+  background: #1e293b;
+  border-color: #64748b;
+  color: #93c5fd;
+}
+
+html.dark .big {
+  color: #60a5fa;
+}
+
+html.dark .price {
+  color: #60a5fa;
+}
+
+html.dark .planning-card,
+html.dark .planning-lock {
+  background: #292524;
+  border-color: #78716c;
+  color: #e7e5e4;
+}
+
+html.dark .material-list span {
+  background: #1c1917;
+  border-color: #a8a29e;
+  color: #e7e5e4;
+}
+
+html.dark .stats-grid .el-card {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .school-grid .el-card {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .law-grid .el-card {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .plan-grid .el-card {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+html.dark .theme-switch {
+  --el-switch-on-color: #3b82f6;
+}

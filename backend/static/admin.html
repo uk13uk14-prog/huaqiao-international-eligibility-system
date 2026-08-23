@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>资格判定系统 · 管理后台</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f4f6f9; color:1a1a2e; }
+    h1 { font-size: 1.25rem; margin: 0 0 16px; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px; }
+    label { font-size: 0.875rem; color: #444; }
+    input[type="text"], input[type="password"] { padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; min-width: 220px; }
+    button { padding: 8px 16px; border-radius: 8px; border: none; background: #2563eb; color: #fff; cursor: pointer; font-size: 0.9rem; }
+    button.secondary { background: #64748b; }
+    button.small { padding: 4px 10px; font-size: 0.8rem; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+    .stat { background: #eef2ff; padding: 12px; border-radius: 8px; text-align: center; }
+    .stat b { display: block; font-size: 1.4rem; color: #3730a3; }
+    .stat span { font-size: 0.8rem; color: #64748b; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; }
+    .muted { color: #64748b; font-size: 0.8rem; }
+    .err { color: #dc2626; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>国际生/华侨生资格判定 · 管理后台</h1>
+  <div class="card">
+    <div class="row">
+      <label>管理令牌（与服务器 <code>ADMIN_TOKEN</code> 一致）</label>
+      <input type="password" id="token" placeholder="粘贴到本地存储" autocomplete="off" />
+      <button type="button" id="saveToken">保存到浏览器</button>
+    </div>
+    <div class="row">
+      <button type="button" id="loadOverview">刷新统计</button>
+      <button type="button" class="secondary" id="loadLeads">刷新咨询列表</button>
+      <label>筛选状态</label>
+      <select id="statusFilter">
+        <option value="">全部</option>
+        <option value="pending" selected>待处理</option>
+        <option value="contacted">已联系</option>
+        <option value="closed">已关闭</option>
+      </select>
+    </div>
+    <p id="error" class="err"></p>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1rem;">使用概况</h2>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1rem;">一对一规划咨询</h2>
+    <p class="muted">用户在 App 内提交的线索会出现在下表；可标记已联系/已关闭。</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>时间</th><th>客户ID</th><th>姓名</th><th>电话</th><th>邮箱</th><th>微信</th><th>需求</th><th>状态</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="leads"></tbody>
+      </table>
+    </div>
+
+    <div class="row">
+      <label>选中记录 ID</label>
+      <input type="text" id="editId" placeholder="从表格复制" />
+      <label>状态</label>
+      <select id="editStatus">
+        <option value="pending">pending</option>
+        <option value="contacted">contacted</option>
+        <option value="closed">closed</option>
+      </select>
+      <label>备注</label>
+      <input type="text" id="editNote" placeholder="内部备注" style="min-width:180px;" />
+      <button type="button" id="patchLead">更新</button>
+    </div>
+  </div>
+
+  <script>
+    const apiBase = ''; // 与后台同域打开时留空
+    function headers() {
+      const t = localStorage.getItem('hq_admin_token') || document.getElementById('token').value.trim();
+      return { 'Content-Type': 'application/json', 'X-Admin-Token': t };
+    }
+    function showErr(msg) {
+      document.getElementById('error').textContent = msg || '';
+    }
+    document.getElementById('saveToken').onclick = function () {
+      const t = document.getElementById('token').value.trim();
+      if (!t) return showErr('请填写令牌');
+      localStorage.setItem('hq_admin_token', t);
+      showErr('');
+      alert('已保存');
+    };
+    document.getElementById('token').value = localStorage.getItem('hq_admin_token') || '';
+
+    async function loadOverview() {
+      showErr('');
+      const r = await fetch(apiBase + '/api/admin/overview', { headers: headers() });
+      if (!r.ok) { showErr(await r.text()); return; }
+      const d = await r.json();
+      document.getElementById('stats').innerHTML = [
+        ['独立客户端数', d.unique_clients],
+        ['累计打开次数', d.total_client_pings],
+        ['咨询线索总数', d.consultation_requests_total],
+        ['待处理咨询', d.consultation_pending],
+        ['资格判定总次数', d.eligibility_judgments_total],
+      ].map(([k, v]) => '<div class="stat"><b>' + v + '</b><span>' + k + '</span></div>').join('');
+    }
+
+    async function loadLeads() {
+      showErr('');
+      const st = document.getElementById('statusFilter').value;
+      const q = st ? ('?status=' + encodeURIComponent(st)) : '';
+      const r = await fetch(apiBase + '/api/admin/consultations' + q, { headers: headers() });
+      if (!r.ok) { showErr(await r.text()); return; }
+      const rows = await r.json();
+      document.getElementById('editId').placeholder = rows[0] ? ('如 ' + rows[0].id) : '—';
+      document.getElementById('leads').innerHTML = rows.map(function (x) {
+        const ts = new Date(x.created_at).toLocaleString();
+        return '<tr><td>' + x.id + '</td><td>' + ts + '</td><td class="muted">' + (x.client_uuid || '—') + '</td><td>' + (x.name || '—') + '</td><td>' + (x.phone || '—') + '</td><td>' + (x.email || '—') + '</td><td>' + (x.wechat || '—') + '</td><td>' + (x.note || '—').replace(/</g, '&lt;') + '</td><td>' + x.status + '</td><td><button type="button" class="small pick" data-id="' + x.id + '">选用</button></td></tr>';
+      }).join('');
+      document.querySelectorAll('.pick').forEach(function (btn) {
+        btn.onclick = function () { document.getElementById('editId').value = btn.getAttribute('data-id'); };
+      });
+    }
+
+    document.getElementById('loadOverview').onclick = loadOverview;
+    document.getElementById('loadLeads').onclick = loadLeads;
+    document.getElementById('statusFilter').onchange = loadLeads;
+
+    document.getElementById('patchLead').onclick = async function () {
+      showErr('');
+      const id = parseInt(document.getElementById('editId').value, 10);
+      if (!id) return showErr('请填写记录 ID');
+      const body = {
+        status: document.getElementById('editStatus').value,
+        admin_note: document.getElementById('editNote').value || null,
+      };
+      const r = await fetch(apiBase + '/api/admin/consultations/' + id, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+      if (!r.ok) { showErr(await r.text()); return; }
+      await loadLeads();
+      alert('已更新');
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+﻿{
+  "huaqiao": {
+    "min_overseas_months_last_2y": 18,
+    "requires_chinese_nationality": true,
+    "requires_no_foreign_nationality": true,
+    "requires_no_mainland_household": true
+  },
+  "international": {
+    "min_overseas_months_last_4y": 24,
+    "min_annual_overseas_months": 9,
+    "requires_foreign_nationality": true,
+    "requires_no_chinese_nationality": true
+  }
+}

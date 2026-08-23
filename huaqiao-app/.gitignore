@@ -1,0 +1,7 @@
+dist/
+node_modules/
+android/
+.env
+huaqiao-app-h5.zip
+.DS_Store
+hbuilder-pack/www/

@@ -1,0 +1,29 @@
+{
+  "name": "huaqiao-eligibility-mobile-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4174",
+    "apk:prepare": "npm run build && npx cap sync android",
+    "apk:open": "npx cap open android",
+    "apk:build": "npm run build && npx cap sync android && cd android && gradlew assembleDebug",
+    "h5:zip": "npm run build && powershell -ExecutionPolicy Bypass -File scripts/zip-h5.ps1",
+    "build:hbuilder": "vite build && node scripts/prepare-hbuilder.cjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "latest",
+    "@capacitor/cli": "latest",
+    "@capacitor/core": "latest",
+    "@vant/touch-emulator": "latest",
+    "html2canvas": "latest",
+    "vant": "latest",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "vite": "latest"
+  }
+}
