@@ -1,0 +1,40 @@
+{
+  "appId": "com.huaqiao.eligibility.coze",
+  "productName": "华侨生资格判定系统 Coze版",
+  "directories": {
+    "output": "release-coze"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../backend/dist/huaqiao-backend-coze",
+      "to": "backend",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/favicon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "华侨生资格判定系统 Coze",
+    "installerIcon": "public/favicon.ico",
+    "uninstallerIcon": "public/favicon.ico",
+    "installerHeaderIcon": "public/favicon.ico",
+    "artifactName": "HuaqiaoEligibility-Coze-v1.0.0.exe"
+  }
+}

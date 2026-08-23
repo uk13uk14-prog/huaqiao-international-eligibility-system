@@ -4,7 +4,7 @@
   "private": true,
   "description": "华侨生国际生资格智能判定系统",
   "author": "Huaqiao Team",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
