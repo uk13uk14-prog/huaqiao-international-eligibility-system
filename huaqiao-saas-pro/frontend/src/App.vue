@@ -82,7 +82,7 @@
 
           <section v-if="tab==='assistant'" class="page"><el-card><h2>智能AI助手</h2><p class="muted">用于国际生政策解读、复杂情况辅助分析、材料准备建议。无任何厂商标识。</p><el-input v-model="assistant.context" type="textarea" rows="3" placeholder="背景：国籍、出生地、父母定居、海外居住、目标专业"/><el-input class="mt" v-model="assistant.question" type="textarea" rows="4" placeholder="请输入政策或升学规划问题"/><el-button class="mt" type="primary" @click="ask">智能AI助手分析</el-button><div v-if="assistant.answer" class="answer">{{assistant.answer}}</div></el-card></section>
 
-          <section v-if="tab==='history'" class="page"><div class="section-head"><div><h2>历史记录</h2><p>按租户隔离保存，免费版限制记录数量，付费版永久保存。</p></div><el-button @click="loadRecords">刷新</el-button></div><el-table :data="records"><el-table-column prop="type" label="模块"/><el-table-column prop="conclusion" label="结论"/><el-table-column label="结果"><template #default="s"><el-tag :type="s.row.qualified?'success':'danger'">{{s.row.qualified?'合格':'不合格'}}</el-tag></template></el-table-column><el-table-column prop="created_at" label="时间"/><el-table-column label="操作"><template #default="s"><el-button size="small" @click="openRecord(s.row.id)">查看</el-button></template></el-table-column></el-table></section>
+          <section v-if="tab==='history'" class="page"><div class="section-head"><div><h2>历史记录</h2><p>按租户隔离保存，免费版限制记录数量，付费版永久保存。</p></div><el-button @click="loadRecords">刷新</el-button></div><el-table :data="records"><el-table-column prop="type" label="模块"/><el-table-column prop="conclusion" label="结论"/><el-table-column label="结果"><template #default="s"><el-tag :type="s.row.result==='PRELIMINARY_ELIGIBLE'?'success':s.row.result==='MANUAL_REVIEW_REQUIRED'?'warning':'danger'">{{ s.row.result==='PRELIMINARY_ELIGIBLE'?'初步符合':s.row.result==='MANUAL_REVIEW_REQUIRED'?'需人工复核':'初步不符合' }}</el-tag></template></el-table-column><el-table-column prop="created_at" label="时间"/><el-table-column label="操作"><template #default="s"><el-button size="small" @click="openRecord(s.row.id)">查看</el-button></template></el-table-column></el-table></section>
 
           <section v-if="tab==='member'" class="page member-page">
             <h2>会员中心</h2>
@@ -273,8 +273,10 @@ const ResultPanel = defineComponent({
       ])
     }
     return()=>h('div',{class:'result-panel'},[
-      h('div',{class:['result-hero', props.result.qualified?'pass':'fail']},[h('span', props.result.qualified?'合格':'不合格'), h('h2',props.result.conclusion)]),
+      h('div',{class:['result-hero', props.result.result==='PRELIMINARY_ELIGIBLE'?'pass':props.result.result==='MANUAL_REVIEW_REQUIRED'?'review':'fail']},[h('span', props.result.result==='PRELIMINARY_ELIGIBLE'?'初步符合':props.result.result==='MANUAL_REVIEW_REQUIRED'?'需人工复核':'初步不符合'), h('h2',props.result.conclusion)]),
+      h('p',{class:'disclaimer'},'本结果为基于当前政策与用户提供信息生成的初步资格评估，不替代教育主管部门、联招办或高校的最终资格审核。'),
       h('h3','判定理由'), h('ul', props.result.reasons.map(r=>h('li',r))),
+      props.result.manual_review_rules?.length ? h('div',{class:'review-box'},[h('h4','需人工复核项'),h('ul',props.result.manual_review_rules.map(r=>h('li',r)))]) : null,
       props.result.suggestions?.length ? h('p',{class:'muted'}, '建议：'+props.result.suggestions.join('；')) : null,
       planningBlock(),
       h('h3','国籍法依据'), h('div',{class:'law-mini'}, props.result.basis_articles.map(a=>h('article',[h('b',`第${a.number}条：${a.title}`), h('p',a.text), h('small',a.explanation)]))),

@@ -259,10 +259,12 @@ const JudgeForm = defineComponent({
 const ResultPanel = defineComponent({
   props: { result: Object }, emits: ['copy', 'print'],
   setup(props, { emit }) { return () => h('section', { class: 'card result-card' }, props.result ? [
-    h('div', { class: ['result-banner', props.result.qualified ? 'pass' : 'fail'] }, [h('span', props.result.qualified ? '合格' : '不合格'), h('strong', props.result.conclusion)]),
+    h('div', { class: ['result-banner', (props.result.result === 'PRELIMINARY_ELIGIBLE' || props.result.qualified) ? 'pass' : (props.result.result === 'MANUAL_REVIEW_REQUIRED' ? 'review' : 'fail')] }, [h('span', props.result.result === 'PRELIMINARY_ELIGIBLE' ? '初步符合条件' : (props.result.result === 'MANUAL_REVIEW_REQUIRED' ? '需人工复核' : (props.result.qualified ? '合格' : '不合格'))), h('strong', props.result.conclusion)]),
     h('h3', '详细判定理由'), h('ul', props.result.reasons.map(r => h('li', r))),
     h('h3', '对应国籍法条款原文'), props.result.basis_articles.map(a => h('article', { class: 'law-card' }, [h('strong', `依据《中华人民共和国国籍法》第${a.number}条：${a.title}`), h('p', a.text), h('small', `解释：${a.explanation}`)])),
     props.result.suggestions.length ? h(ElAlert, { title: props.result.suggestions.join('；'), type: 'warning', closable: false }) : null,
+    props.result.result === 'MANUAL_REVIEW_REQUIRED' ? h(ElAlert, { title: '本结果需要人工复核。部分条件无法仅凭当前信息做出确定性判断，建议联系联招办或目标高校招生办确认。', type: 'info', closable: false, style: 'margin-top:12px' }) : null,
+    h(ElAlert, { title: '本结果为基于当前政策与用户提供信息生成的初步资格评估，不替代教育主管部门、联招办或高校的最终资格审核。', type: 'info', closable: false, style: 'margin-top:12px' }),
     h('h3', '匹配大学推荐'),
     props.result.recommendations?.length ? h('div', { class: 'recommend-grid' }, props.result.recommendations.map(u => h('article', { class: 'recommend-card' }, [
       h('div', { class: 'recommend-title' }, [h('strong', `#${u.ranking} ${u.name}`), h('span', u.province)]),
@@ -325,7 +327,7 @@ const SchedulePanel = defineComponent({
 
 const HistoryPanel = defineComponent({
   props: { records: Array }, emits: ['reload'],
-  setup(props, { emit }) { return () => h('section', { class: 'card' }, [h('div', { class: 'section-head' }, [h('div', [h('h2', '永久保存的历史记录'), h('p', '后端 SQLite 保存全部判定历史。')]), h(ElButton, { onClick: () => emit('reload') }, () => '刷新')]), h(ElTable, { data: props.records, stripe: true }, () => [h(ElTableColumn, { prop: 'record_id', label: 'ID', width: 80 }), h(ElTableColumn, { prop: 'eligibility_type', label: '类型', width: 120 }), h(ElTableColumn, { prop: 'conclusion', label: '结论' }), h(ElTableColumn, { label: '结果', width: 100, formatter: row => row.qualified ? '合格' : '不合格' }), h(ElTableColumn, { prop: 'created_at', label: '时间' })])]) }
+  setup(props, { emit }) { return () => h('section', { class: 'card' }, [h('div', { class: 'section-head' }, [h('div', [h('h2', '永久保存的历史记录'), h('p', '后端 SQLite 保存全部判定历史。')]), h(ElButton, { onClick: () => emit('reload') }, () => '刷新')]), h(ElTable, { data: props.records, stripe: true }, () => [h(ElTableColumn, { prop: 'record_id', label: 'ID', width: 80 }), h(ElTableColumn, { prop: 'eligibility_type', label: '类型', width: 120 }), h(ElTableColumn, { prop: 'conclusion', label: '结论' }), h(ElTableColumn, { label: '结果', width: 100, formatter: row => row.result === 'MANUAL_REVIEW_REQUIRED' ? '需复核' : (row.qualified ? '合格' : '不合格') }), h(ElTableColumn, { prop: 'created_at', label: '时间' })])]) }
 })
 </script>
 

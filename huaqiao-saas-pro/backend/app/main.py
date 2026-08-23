@@ -47,8 +47,10 @@ from .services.permissions import FREE_LIMITS, entitlements, feature_summary
 from .services.payments import create_payment_order, mark_payment_paid
 from .services.planning import planning_for
 from .services.policies import list_policy_documents
-from .services.recommend import recommend, timeline
-from .services.rules import judge_huaqiao, judge_international
+from .services.recommend import recommend
+from .services.eligibility_engine import evaluate_international_student, evaluate_overseas_chinese, InternationalStudentInput, OverseasChineseStudentInput, timeline
+from .services.rules import judge_huaqiao, judge_international  # DEPRECATED: kept for backward compat, not used for final policy decision
+from .services.eligibility_engine import evaluate_overseas_chinese, evaluate_international_student
 from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password
 from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
 
@@ -264,9 +266,24 @@ def planning(kind: str, user: User = Depends(get_current_user)):
 @app.post("/api/eligibility/international")
 @limiter.limit("10/minute")
 def international(request: Request, data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    result = judge_international(data)
+    engine_input = InternationalStudentInput(
+        has_foreign_nationality=data.has_foreign_nationality,
+        foreign_nationality_country=data.foreign_nationality_country,
+        passport_issue_date=data.passport_issue_date,
+        birth_country=data.birth_country,
+        birth_at_foreign_nationality=data.birth_at_foreign_nationality,
+        parent_chinese_citizen=data.parent_chinese_citizen,
+        parent_settled_abroad=data.parent_settled_abroad,
+        previous_chinese_nationality=data.previous_chinese_nationality,
+        naturalization_date=data.naturalization_date,
+        denationalization_certificate=data.denationalization_certificate,
+        intended_admission_year=data.intended_admission_year or 2026,
+        overseas_residence_months_last_4y=data.overseas_residence_months_last_4y,
+        annual_months_overseas=data.annual_months_overseas,
+    )
+    result = evaluate_international_student(engine_input)
     recs = recommend(db, user, "international", data.intended_field, data.score)
-    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="international", qualified=result["qualified"], conclusion=result["conclusion"], reasons=json.dumps(result["reasons"], ensure_ascii=False), basis_articles=json.dumps(result["basis_articles"], ensure_ascii=False), suggestions=json.dumps(result["suggestions"], ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
+    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="international", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
     db.add(record); db.commit(); db.refresh(record)
     return {**result, "record_id": record.id, "recommendations": recs, "planning": paid_planning_payload(user, "international"), "features": feature_summary(user)}
 
@@ -274,9 +291,23 @@ def international(request: Request, data: EligibilityInput, user: User = Depends
 @app.post("/api/eligibility/huaqiao")
 @limiter.limit("10/minute")
 def huaqiao(request: Request, data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    result = judge_huaqiao(data)
+    engine_input = OverseasChineseStudentInput(
+        has_chinese_nationality=data.has_chinese_nationality,
+        has_foreign_nationality=data.has_foreign_nationality,
+        has_mainland_household=data.has_mainland_household,
+        has_hkmt_household=data.has_hkmt_household,
+        residence_type=data.residence_type,
+        residence_country=data.residence_country,
+        residence_years=data.residence_years,
+        overseas_residence_months_last_2y=data.overseas_residence_months_last_2y,
+        overseas_residence_months_last_5y=data.overseas_residence_months_last_5y,
+        parent_residence_months_last_2y=data.parent_residence_months_last_2y,
+        parent_residence_months_last_5y=data.parent_residence_months_last_5y,
+        intended_admission_year=data.intended_admission_year or 2026,
+    )
+    result = evaluate_overseas_chinese(engine_input)
     recs = recommend(db, user, "huaqiao", data.intended_field, data.score)
-    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="huaqiao", qualified=result["qualified"], conclusion=result["conclusion"], reasons=json.dumps(result["reasons"], ensure_ascii=False), basis_articles=json.dumps(result["basis_articles"], ensure_ascii=False), suggestions=json.dumps(result["suggestions"], ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
+    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="huaqiao", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
     db.add(record); db.commit(); db.refresh(record)
     return {**result, "record_id": record.id, "recommendations": recs, "planning": paid_planning_payload(user, "huaqiao"), "features": feature_summary(user)}
 

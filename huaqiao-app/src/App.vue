@@ -114,8 +114,8 @@
 
       <section v-if="tab === 'result'" class="result-screen" ref="resultRef">
         <template v-if="result">
-          <div :class="['result-hero', result.qualified ? 'pass' : 'fail']">
-            <span>{{ result.qualified ? '合格' : '不合格' }}</span>
+          <div :class="['result-hero', result.result === 'PRELIMINARY_ELIGIBLE' ? 'pass' : result.result === 'MANUAL_REVIEW_REQUIRED' ? 'review' : 'fail']">
+            <span>{{ result.result === 'PRELIMINARY_ELIGIBLE' ? '初步符合条件' : result.result === 'MANUAL_REVIEW_REQUIRED' ? '需要人工复核' : '初步不符合条件' }}</span>
             <h2>{{ result.conclusion }}</h2>
             <p>{{ result.eligibility_type === 'huaqiao' ? '华侨生资格初判' : '国际生资格初判' }}</p>
           </div>
@@ -236,7 +236,7 @@
         <van-pull-refresh v-model="refreshing" @refresh="loadRecords">
           <van-cell-group inset>
             <van-cell v-for="record in records" :key="record.record_id" :title="record.conclusion" :label="`${record.eligibility_type} · ${new Date(record.created_at).toLocaleString()}`">
-              <template #value><van-tag :type="record.qualified ? 'success' : 'danger'">{{ record.qualified ? '合格' : '不合格' }}</van-tag></template>
+              <template #value><van-tag :type="record.result === 'PRELIMINARY_ELIGIBLE' ? 'success' : record.result === 'MANUAL_REVIEW_REQUIRED' ? 'warning' : 'danger'">{{ record.result === 'PRELIMINARY_ELIGIBLE' ? '初步符合' : record.result === 'MANUAL_REVIEW_REQUIRED' ? '需人工复核' : '初步不符合' }}</van-tag></template>
             </van-cell>
           </van-cell-group>
         </van-pull-refresh>

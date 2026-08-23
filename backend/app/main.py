@@ -33,7 +33,16 @@ from .seed import seed_data
 from .services.nationality_law import NATIONALITY_LAW, get_article
 from .services.policies import list_policy_documents
 from .services.recommend import recommend_universities
-from .services.rules import determine_huaqiao, determine_international, to_payload
+from .services.rules import determine_huaqiao, determine_international, to_payload  # DEPRECATED: kept for legacy compatibility
+from .services.eligibility_engine import (
+    evaluate_international_student,
+    evaluate_overseas_chinese_student,
+    InternationalStudentInput,
+    OverseasChineseStudentInput,
+    ResidenceRecord,
+    EligibilityDecision,
+)
+from datetime import date as date_type
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -234,14 +243,98 @@ def persist_result(db: Session, kind: str, data: EligibilityInput, result):
     return to_payload(record.id, user.id, kind, result, record.created_at, recommendations)
 
 
+def _adapt_eligibility_input_to_international(data: EligibilityInput) -> InternationalStudentInput:
+    """Adapter: convert legacy EligibilityInput to new engine InternationalStudentInput."""
+    today = date_type.today()
+    residence_records = []
+    if data.entry_exit_records:
+        for rec in data.entry_exit_records:
+            residence_records.append(ResidenceRecord(
+                entry_date=date_type.fromisoformat(rec["entry_date"]) if isinstance(rec["entry_date"], str) else rec["entry_date"],
+                exit_date=date_type.fromisoformat(rec["exit_date"]) if isinstance(rec["exit_date"], str) else rec["exit_date"],
+            ))
+    return InternationalStudentInput(
+        current_nationality=data.current_nationality or "",
+        passport_issue_date=date_type.fromisoformat(data.passport_issue_date) if data.passport_issue_date else None,
+        admission_year=data.admission_year or today.year,
+        foreign_passport_years=data.foreign_passport_years,
+        residence_days_last_4y=data.residence_days_last_4y,
+        residence_months_last_4y=data.overseas_residence_months_last_2y,
+        residence_records=residence_records or None,
+        parent_chinese_nationality=data.parent_chinese_nationality,
+        applicant_foreign_nationality_at_birth=data.applicant_foreign_nationality_at_birth,
+        parent_settled_abroad=data.parent_settled_abroad,
+        birth_country=data.birth_country,
+        original_mainland_or_hkmt_resident=data.original_mainland_or_hkmt_resident,
+        naturalization_date=data.naturalization_date,
+    )
+
+
+def _adapt_eligibility_input_to_overseas_chinese(data: EligibilityInput) -> OverseasChineseStudentInput:
+    """Adapter: convert legacy EligibilityInput to new engine OverseasChineseStudentInput."""
+    today = date_type.today()
+    residence_records = []
+    if data.entry_exit_records:
+        for rec in data.entry_exit_records:
+            residence_records.append(ResidenceRecord(
+                entry_date=date_type.fromisoformat(rec["entry_date"]) if isinstance(rec["entry_date"], str) else rec["entry_date"],
+                exit_date=date_type.fromisoformat(rec["exit_date"]) if isinstance(rec["exit_date"], str) else rec["exit_date"],
+            ))
+    # Convert months to days for parent (legacy used months)
+    parent_days_2y = None
+    if data.parent_overseas_residence_months_last_2y is not None:
+        parent_days_2y = int(data.parent_overseas_residence_months_last_2y * 30)
+    return OverseasChineseStudentInput(
+        has_permanent_residence=data.has_permanent_residence,
+        legal_residence_years=data.legal_residence_years,
+        applicant_cumulative_days_2years=data.applicant_cumulative_days_2years,
+        applicant_cumulative_days_pre2years=data.applicant_cumulative_days_pre2years,
+        applicant_consecutive_natural_years=data.applicant_consecutive_natural_years,
+        applicant_cumulative_days_5years=data.applicant_cumulative_days_5years,
+        applicant_cumulative_days_pre5years=data.applicant_cumulative_days_pre5years,
+        applicant_residence_records=residence_records or None,
+        parent_residence_type=data.parent_residence_type,
+        parent_cumulative_days_2years=parent_days_2y,
+        parent_cumulative_days_5years=data.parent_cumulative_days_5years,
+        parent_consecutive_natural_years=data.parent_consecutive_natural_years,
+        parent_legal_residence_years=data.parent_legal_residence_years,
+        overseas_chinese_identity_confirmed=data.overseas_chinese_identity_confirmed,
+        has_mainland_hukou=data.has_mainland_hukou,
+        target_university_name=data.target_university_name,
+        study_abroad_period=data.study_abroad_period,
+        official_duty_abroad_period=data.official_duty_abroad_period,
+        enrollment_year=data.admission_year or today.year,
+    )
+
+
+def _decision_to_legacy_result(decision: EligibilityDecision):
+    """Convert new engine decision to legacy result format for backward compatibility."""
+    class LegacyResult:
+        pass
+    r = LegacyResult()
+    r.qualified = decision.result == "PRELIMINARY_ELIGIBLE"
+    r.conclusion = decision.explanation
+    r.reasons = [mr.rule_id for mr in decision.manual_review_rules] if decision.manual_review_rules else []
+    r.article_numbers = [ev.source_id for ev in decision.evidence] if decision.evidence else []
+    r.suggestions = []
+    r._decision = decision  # Attach full decision for new API consumers
+    return r
+
+
 @app.post("/api/eligibility/huaqiao", response_model=EligibilityResult)
 def judge_huaqiao(data: EligibilityInput, db: Session = Depends(get_db)):
-    return persist_result(db, "huaqiao", data, determine_huaqiao(data))
+    engine_input = _adapt_eligibility_input_to_overseas_chinese(data)
+    decision = evaluate_overseas_chinese_student(engine_input)
+    result = _decision_to_legacy_result(decision)
+    return persist_result(db, "huaqiao", data, result)
 
 
 @app.post("/api/eligibility/international", response_model=EligibilityResult)
 def judge_international(data: EligibilityInput, db: Session = Depends(get_db)):
-    return persist_result(db, "international", data, determine_international(data))
+    engine_input = _adapt_eligibility_input_to_international(data)
+    decision = evaluate_international_student(engine_input)
+    result = _decision_to_legacy_result(decision)
+    return persist_result(db, "international", data, result)
 
 
 @app.get("/api/records", response_model=list[EligibilityResult])
