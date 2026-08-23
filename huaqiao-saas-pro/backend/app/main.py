@@ -50,9 +50,9 @@ from .services.payments import create_payment_order, mark_payment_paid
 from .services.planning import planning_for
 from .services.policies import list_policy_documents
 from .services.recommend import recommend
-from .services.eligibility_engine import evaluate_international_student, evaluate_overseas_chinese, InternationalStudentInput, OverseasChineseStudentInput, timeline
+from .services.eligibility_engine import evaluate_international_student, evaluate_overseas_chinese_student, InternationalStudentInput, OverseasChineseStudentInput
 from .services.rules import judge_huaqiao, judge_international  # DEPRECATED: kept for backward compat, not used for final policy decision
-from .services.eligibility_engine import evaluate_overseas_chinese, evaluate_international_student
+from .services.eligibility_engine import evaluate_overseas_chinese_student, evaluate_international_student
 from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password
 from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
 from .services.privacy import redact_log_message, AuditLogger, AuditAction
@@ -355,7 +355,7 @@ def huaqiao(request: Request, data: EligibilityInput, user: User = Depends(get_c
         parent_residence_months_last_5y=data.parent_residence_months_last_5y,
         intended_admission_year=data.intended_admission_year or 2026,
     )
-    result = evaluate_overseas_chinese(engine_input)
+    result = evaluate_overseas_chinese_student(engine_input)
     recs = recommend(db, user, "huaqiao", data.intended_field, data.score)
     # R4.3 FIX: Encrypt raw_input before persistence
     from .services.encryption_at_rest import encrypt_json, blind_index
