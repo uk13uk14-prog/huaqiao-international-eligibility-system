@@ -6,9 +6,15 @@ REM ============================================================
 
 setlocal enabledelayedexpansion
 
+REM Get the script directory (project root)
+set "SCRIPT_DIR=%~dp0"
+set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+
 echo ============================================================
 echo  华侨生资格评估系统 - Windows 安装包构建
 echo ============================================================
+echo.
+echo Project directory: %SCRIPT_DIR%
 echo.
 
 REM Check Python
@@ -27,7 +33,7 @@ if errorlevel 1 (
 
 REM Step 1: Install backend dependencies
 echo [1/6] Installing backend dependencies...
-cd ..\backend
+cd /d "%SCRIPT_DIR%\backend"
 pip install -r requirements.txt pyinstaller --quiet
 if errorlevel 1 (
     echo [ERROR] Failed to install backend dependencies
@@ -46,7 +52,7 @@ echo       Done. Output: backend\dist\huaqiao-backend\
 
 REM Step 3: Install frontend dependencies
 echo [3/6] Installing frontend dependencies...
-cd ..\frontend
+cd /d "%SCRIPT_DIR%\frontend"
 call npm install
 if errorlevel 1 (
     echo [ERROR] Failed to install frontend dependencies
@@ -78,10 +84,9 @@ echo.
 echo ============================================================
 echo  Output files:
 echo ============================================================
-dir /b release\*.exe 2>nul
+dir /b "%SCRIPT_DIR%\frontend\release\*.exe" 2>nul
 echo.
 echo  The installer is ready for distribution.
 echo ============================================================
 
-cd ..
 endlocal
