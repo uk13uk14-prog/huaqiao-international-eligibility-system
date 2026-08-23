@@ -3,10 +3,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const http = require('http');
 
-// Handle Windows installer events
-if (require('electron-squirrel-startup')) {
-  app.quit();
-}
+// NSIS installer - no squirrel startup handling needed
 
 // Configuration
 const BACKEND_PORT = 9090;
