@@ -1,10 +1,14 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -31,8 +35,15 @@ from .services.policies import list_policy_documents
 from .services.recommend import recommend_universities
 from .services.rules import determine_huaqiao, determine_international, to_payload
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title=settings.app_name, version="1.0.0", description="华侨生/国际生资格智能判定 API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -40,6 +51,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @app.on_event("startup")
 def startup():
+    # Production config validation
+    settings.validate_production_config()
     init_db()
     db = SessionLocal()
     try:
@@ -102,7 +115,8 @@ def create_consultation(payload: ConsultationCreate, db: Session = Depends(get_d
 
 
 @app.get("/api/admin/overview", response_model=AdminOverview)
-def admin_overview(_: bool = Depends(verify_admin), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def admin_overview(request: Request, _: bool = Depends(verify_admin), db: Session = Depends(get_db)):
     unique_clients = int(db.query(func.count(AppClient.id)).scalar() or 0)
     total_pings = int(db.query(func.coalesce(func.sum(AppClient.ping_count), 0)).scalar() or 0)
     consultation_total = db.query(ConsultationRequest).count()

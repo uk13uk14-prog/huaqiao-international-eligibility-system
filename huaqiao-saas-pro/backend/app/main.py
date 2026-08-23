@@ -2,9 +2,12 @@ import json
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -51,11 +54,22 @@ from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="1.0.0", description="国际生资格智评系统 SaaS Pro API")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
 @app.on_event("startup")
 def startup():
+    # Validate required production settings
+    if not settings.jwt_secret_key or settings.jwt_secret_key == "change-me-in-production":
+        raise RuntimeError("JWT_SECRET_KEY must be set. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(48))'")
+    from .services.vault_crypto import validate_vault_config
+    validate_vault_config()
     init_db()
     db = SessionLocal()
     try:
@@ -75,7 +89,8 @@ def user_payload(user: User):
 
 
 @app.post("/api/auth/register")
-def register(data: RegisterIn, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, data: RegisterIn, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="邮箱已注册")
     tenant = Tenant(name=data.tenant_name, tenant_type=data.tenant_type)
@@ -87,10 +102,20 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
 
 
 @app.post("/api/auth/login")
-def login(data: LoginIn, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, data: LoginIn, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
-    if not user or not verify_password(data.password, user.password_hash):
+    if not user:
         raise HTTPException(status_code=401, detail="账号或密码错误")
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+    # Legacy SHA256 migration: if hash doesn't start with $2b$, it's old format
+    if not user.password_hash.startswith("$2b$"):
+        if _legacy_verify_password(data.password, user.password_hash):
+            user.password_hash = hash_password(data.password)
+            db.commit()
+        else:
+            raise HTTPException(status_code=401, detail="账号或密码错误")
     return {"token": create_token(db, user), "user": user_payload(user)}
 
 
@@ -218,7 +243,8 @@ def planning(kind: str, user: User = Depends(get_current_user)):
 
 
 @app.post("/api/eligibility/international")
-def international(data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def international(request: Request, data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     result = judge_international(data)
     recs = recommend(db, user, "international", data.intended_field, data.score)
     record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="international", qualified=result["qualified"], conclusion=result["conclusion"], reasons=json.dumps(result["reasons"], ensure_ascii=False), basis_articles=json.dumps(result["basis_articles"], ensure_ascii=False), suggestions=json.dumps(result["suggestions"], ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
@@ -227,7 +253,8 @@ def international(data: EligibilityInput, user: User = Depends(get_current_user)
 
 
 @app.post("/api/eligibility/huaqiao")
-def huaqiao(data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def huaqiao(request: Request, data: EligibilityInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     result = judge_huaqiao(data)
     recs = recommend(db, user, "huaqiao", data.intended_field, data.score)
     record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="huaqiao", qualified=result["qualified"], conclusion=result["conclusion"], reasons=json.dumps(result["reasons"], ensure_ascii=False), basis_articles=json.dumps(result["basis_articles"], ensure_ascii=False), suggestions=json.dumps(result["suggestions"], ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
