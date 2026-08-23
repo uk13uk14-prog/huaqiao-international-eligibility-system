@@ -1,5 +1,7 @@
 import json
+import logging
 import secrets
+import time
 from datetime import datetime, timedelta
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
@@ -53,8 +55,14 @@ from .services.rules import judge_huaqiao, judge_international  # DEPRECATED: ke
 from .services.eligibility_engine import evaluate_overseas_chinese, evaluate_international_student
 from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password
 from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
+from .services.privacy import redact_log_message, AuditLogger, AuditAction
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Audit logger instance
+audit_logger = AuditLogger()
+
 app = FastAPI(title=settings.app_name, version="1.0.0", description="国际生资格智评系统 SaaS Pro API")
 
 # Rate limiter
@@ -63,6 +71,43 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+# --- Log Redaction & Privacy Audit Middleware ---
+@app.middleware("http")
+async def privacy_audit_middleware(request: Request, call_next):
+    """Middleware that redacts sensitive data from request logs and audits admin access."""
+    start_time = time.time()
+    path = request.url.path
+    method = request.method
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Log request (redacted)
+    try:
+        body_bytes = await request.body()
+        if body_bytes:
+            body_text = body_bytes.decode("utf-8", errors="replace")[:500]
+            redacted_body = redact_log_message(body_text)
+            logger.info(f"Request: {method} {path} from {client_ip} body={redacted_body}")
+    except Exception:
+        logger.info(f"Request: {method} {path} from {client_ip}")
+
+    response = await call_next(request)
+
+    duration_ms = round((time.time() - start_time) * 1000, 1)
+    logger.info(f"Response: {method} {path} status={response.status_code} duration={duration_ms}ms")
+
+    # Audit log for admin endpoints
+    if path.startswith("/api/admin/") and response.status_code == 200:
+        audit_logger.log(
+            actor=client_ip,
+            action=AuditAction.ADMIN_ACCESS_PROFILE,
+            resource_type="admin_endpoint",
+            resource_id=path,
+            details={"method": method, "status": response.status_code},
+        )
+
+    return response
 
 
 @app.on_event("startup")
@@ -283,7 +328,12 @@ def international(request: Request, data: EligibilityInput, user: User = Depends
     )
     result = evaluate_international_student(engine_input)
     recs = recommend(db, user, "international", data.intended_field, data.score)
-    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="international", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
+    # R4.3 FIX: Encrypt raw_input before persistence
+    from .services.encryption_at_rest import encrypt_json, encrypt_text, blind_index
+    raw_input_enc = encrypt_json(data.model_dump())
+    passport_plain = getattr(data, "passport_number", "") or ""
+    passport_idx = blind_index(passport_plain) if passport_plain else ""
+    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="international", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input="[ENCRYPTED]", raw_input_encrypted=raw_input_enc, passport_blind_index=passport_idx)
     db.add(record); db.commit(); db.refresh(record)
     return {**result, "record_id": record.id, "recommendations": recs, "planning": paid_planning_payload(user, "international"), "features": feature_summary(user)}
 
@@ -307,7 +357,12 @@ def huaqiao(request: Request, data: EligibilityInput, user: User = Depends(get_c
     )
     result = evaluate_overseas_chinese(engine_input)
     recs = recommend(db, user, "huaqiao", data.intended_field, data.score)
-    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="huaqiao", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input=data.model_dump_json())
+    # R4.3 FIX: Encrypt raw_input before persistence
+    from .services.encryption_at_rest import encrypt_json, blind_index
+    raw_input_enc = encrypt_json(data.model_dump())
+    id_card_plain = getattr(data, "id_card_number", "") or ""
+    id_card_idx = blind_index(id_card_plain) if id_card_plain else ""
+    record = EligibilityRecord(tenant_id=user.tenant_id, user_id=user.id, eligibility_type="huaqiao", qualified=result["result"] == "PRELIMINARY_ELIGIBLE", conclusion=result["explanation"], reasons=json.dumps(result.get("failed_rules", []), ensure_ascii=False), basis_articles=json.dumps(result.get("evidence", []), ensure_ascii=False), suggestions=json.dumps(result.get("manual_review_rules", []), ensure_ascii=False), recommendations=json.dumps(recs, ensure_ascii=False), raw_input="[ENCRYPTED]", raw_input_encrypted=raw_input_enc, id_card_blind_index=id_card_idx)
     db.add(record); db.commit(); db.refresh(record)
     return {**result, "record_id": record.id, "recommendations": recs, "planning": paid_planning_payload(user, "huaqiao"), "features": feature_summary(user)}
 
@@ -316,6 +371,7 @@ def huaqiao(request: Request, data: EligibilityInput, user: User = Depends(get_c
 def records(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     limit = entitlements(user)["record_limit"]
     rows = db.query(EligibilityRecord).filter(EligibilityRecord.tenant_id == user.tenant_id).order_by(EligibilityRecord.created_at.desc()).limit(limit).all()
+    # R4.3 FIX 6: Return masked records — no sensitive fields
     return [{"id": r.id, "type": r.eligibility_type, "qualified": r.qualified, "conclusion": r.conclusion, "created_at": r.created_at} for r in rows]
 
 
@@ -334,7 +390,7 @@ def record_detail(record_id: int, user: User = Depends(get_current_user), db: Se
         "suggestions": json.loads(record.suggestions or "[]"),
         "recommendations": json.loads(record.recommendations or "[]"),
         "planning": paid_planning_payload(user, record.eligibility_type),
-        "raw_input": json.loads(record.raw_input or "{}"),
+        "raw_input": "[MASKED]",
         "created_at": record.created_at,
     }
 
@@ -820,3 +876,193 @@ def admin_create_codes(data: CreateCodeIn, _: User = Depends(require_admin), db:
 @app.get("/api/admin/recharge-codes")
 def admin_codes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     return db.query(RechargeCode).order_by(RechargeCode.created_at.desc()).limit(200).all()
+
+
+# --- R4.3 Privacy Endpoints ---
+
+@app.delete("/api/user/{user_id}")
+def delete_user_data(
+    user_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete all personal data for a user (GDPR-style right to erasure).
+    Requires admin authentication.
+    """
+    from .services.data_deletion import DataDeletionService
+
+    deleter = DataDeletionService(db)
+    result = deleter.hard_delete_user_data(user_id)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Deletion failed"))
+
+    # Audit log
+    audit_logger.log(
+        actor="admin",
+        action=AuditAction.DELETE_USER_DATA,
+        resource_type="user",
+        resource_id=user_id,
+        details={"deleted_records": result.get("records_deleted", 0)},
+    )
+
+    return {"ok": True, "message": f"User {user_id} data deleted", "details": result}
+
+
+@app.get("/api/audit-logs")
+def get_audit_logs(
+    limit: int = Query(100, ge=1, le=500),
+    _: User = Depends(require_admin),
+):
+    """
+    Query audit logs. Requires admin authentication.
+    """
+    logs = audit_logger.query_logs(limit=limit)
+    return {"logs": logs}
+
+
+# --- R4.3 FIX 4: Self-service data deletion ---
+
+@app.delete("/api/me/data")
+def self_delete_data(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete all personal data for the authenticated user.
+    Uses current user identity — client cannot specify which user to delete.
+    """
+    from .services.encryption_at_rest import encrypt_text
+    from .services.audit_log import AuditLog
+
+    user_id = user.id
+    tenant_id = user.tenant_id
+
+    # Delete eligibility records
+    records_deleted = db.query(EligibilityRecord).filter(
+        EligibilityRecord.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    # Anonymize user record (keep account structure, remove PII)
+    user.email = f"deleted_{user_id}@anonymous.local"
+    user.name = "[DELETED]"
+    user.password_hash = encrypt_text(f"deleted_{user_id}")
+    user.role = "member"
+    user.permissions = []
+    user.is_active = False
+
+    # Revoke all tokens
+    db.query(AuthToken).filter(AuthToken.user_id == user_id).delete(synchronize_session=False)
+
+    # Delete vault cipher_blob
+    vault = db.query(CustomerVault).filter(
+        CustomerVault.tenant_id == tenant_id,
+        CustomerVault.user_id == user_id
+    ).first()
+    if vault:
+        vault.cipher_blob = ""
+
+    db.commit()
+
+    # Audit log
+    audit_logger = AuditLog(db)
+    audit_logger.log_action(
+        action_type="self_data_deletion",
+        user_id=user_id,
+        resource_type="user",
+        resource_id=user_id,
+        details={"records_deleted": records_deleted},
+    )
+
+    return {"ok": True, "message": "Your personal data has been deleted", "records_deleted": records_deleted}
+
+
+# --- R4.3 FIX 5: Sensitive Data RBAC ---
+
+def require_sensitive_data_access(user: User = Depends(get_current_user)):
+    """
+    Require the user to have 'sensitive_data_access' permission.
+    - Normal user → 403
+    - Admin without sensitive_data_access → 403
+    - Admin with sensitive_data_access → ALLOW
+    """
+    permissions = user.permissions or []
+    if "sensitive_data_access" in permissions:
+        return user
+    raise HTTPException(403, "Forbidden: requires sensitive_data_access permission")
+
+
+# --- R4.3 FIX 6: API Minimization — masked records endpoints ---
+
+def _mask_record(r: EligibilityRecord) -> dict:
+    """Return a record dict with sensitive fields masked."""
+    return {
+        "id": r.id,
+        "type": r.eligibility_type,
+        "qualified": r.qualified,
+        "conclusion": r.conclusion,
+        "created_at": r.created_at,
+        # Sensitive fields are NOT included in default response
+        "raw_input": "[MASKED]",
+        "passport_info": "[MASKED]",
+    }
+
+
+def _unmask_record(r: EligibilityRecord) -> dict:
+    """Return a record dict with decrypted sensitive fields (requires sensitive_data_access)."""
+    from .services.encryption_at_rest import decrypt_json, decrypt_text
+    raw_input_data = {}
+    if r.raw_input_encrypted:
+        raw_input_data = decrypt_json(r.raw_input_encrypted)
+    return {
+        "id": r.id,
+        "type": r.eligibility_type,
+        "qualified": r.qualified,
+        "conclusion": r.conclusion,
+        "created_at": r.created_at,
+        "raw_input": raw_input_data,
+    }
+
+
+@app.get("/api/records/{record_id}")
+def get_record_detail(
+    record_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get record detail — masked by default."""
+    record = db.query(EligibilityRecord).filter(
+        EligibilityRecord.id == record_id,
+        EligibilityRecord.user_id == user.id,
+    ).first()
+    if not record:
+        raise HTTPException(404, "Record not found")
+    return _mask_record(record)
+
+
+@app.get("/api/records/{record_id}/sensitive")
+def get_record_sensitive(
+    record_id: int,
+    user: User = Depends(require_sensitive_data_access),
+    db: Session = Depends(get_db),
+):
+    """Get record detail with decrypted sensitive data — requires sensitive_data_access."""
+    record = db.query(EligibilityRecord).filter(
+        EligibilityRecord.id == record_id,
+    ).first()
+    if not record:
+        raise HTTPException(404, "Record not found")
+
+    # Audit log
+    from .services.audit_log import AuditLog
+    audit_logger = AuditLog(db)
+    audit_logger.log_action(
+        action_type="sensitive_data_access",
+        user_id=user.id,
+        resource_type="record",
+        resource_id=record_id,
+        details={"action": "decrypt_raw_input"},
+    )
+
+    return _unmask_record(record)

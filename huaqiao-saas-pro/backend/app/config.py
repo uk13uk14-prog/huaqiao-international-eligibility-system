@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     alipay_enabled: bool = False
     alipay_app_id: str = ""
     alipay_public_key: str = ""
+    # R4.3 Privacy settings
+    privacy_hmac_secret: str = ""  # For blind index (searchable encryption)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig")
 

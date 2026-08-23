@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://api.example.com/v1"
     ai_model: str = "default-chat-model"
     env: str = "development"
+    # R4.3 Privacy settings
+    privacy_hmac_secret: str = ""  # For blind index (searchable encryption)
+    privacy_vault_key: str = ""  # For field-level encryption (defaults to VAULT_FERNET_KEY if empty)
 
     @property
     def cors_origin_list(self):

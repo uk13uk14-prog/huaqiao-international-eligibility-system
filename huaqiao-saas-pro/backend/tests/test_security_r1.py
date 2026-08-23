@@ -171,14 +171,19 @@ class TestVaultFailFast:
             get_settings.cache_clear()
 
     def test_valid_key_works(self):
+        from cryptography.fernet import Fernet
+        test_key = Fernet.generate_key().decode()
         from app.config import get_settings
         get_settings.cache_clear()
-        from app.services.vault_crypto import encrypt_profile_json, decrypt_profile_json
-        plaintext = {"name": "张三", "id_number": "110101199001011234"}
-        ciphertext = encrypt_profile_json(plaintext)
-        assert ciphertext != str(plaintext)
-        decrypted = decrypt_profile_json(ciphertext)
-        assert decrypted == plaintext
+        with patch.dict(os.environ, {"VAULT_FERNET_KEY": test_key}, clear=False):
+            get_settings.cache_clear()
+            from app.services.vault_crypto import encrypt_profile_json, decrypt_profile_json
+            plaintext = {"name": "张三", "id_number": "110101199001011234"}
+            ciphertext = encrypt_profile_json(plaintext)
+            assert ciphertext != str(plaintext)
+            decrypted = decrypt_profile_json(ciphertext)
+            assert decrypted == plaintext
+            get_settings.cache_clear()
 
 
 class TestProductionConfigGate:

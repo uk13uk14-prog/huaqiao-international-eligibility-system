@@ -17,6 +17,11 @@ class UserInfo(Base):
     household_info = Column(Text, default="")
     residence_records = Column(Text, default="{}")
     family_info = Column(Text, default="{}")
+    # R4.3 FIX: Encrypted columns for sensitive data at rest
+    passport_info_encrypted = Column(Text, nullable=True)
+    household_info_encrypted = Column(Text, nullable=True)
+    passport_blind_index = Column(String(64), nullable=True)
+    id_card_blind_index = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     records = relationship("EligibilityRecord", back_populates="user")
@@ -34,6 +39,10 @@ class EligibilityRecord(Base):
     basis_articles = Column(Text, nullable=False)
     suggestions = Column(Text, default="")
     raw_input = Column(Text, default="{}")
+    # R4.3 FIX: Encrypted raw_input for sensitive data at rest
+    raw_input_encrypted = Column(Text, nullable=True)
+    passport_blind_index = Column(String(64), nullable=True)
+    id_card_blind_index = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("UserInfo", back_populates="records")

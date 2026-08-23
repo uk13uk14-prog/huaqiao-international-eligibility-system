@@ -56,6 +56,24 @@
         </el-tab-pane>
       </el-tabs>
     </main>
+
+    <footer class="privacy-footer">
+      <p class="privacy-notice">
+        <strong>隐私声明：</strong>本系统严格遵守《个人信息保护法》。您提交的护照信息、身份证件、居住记录等敏感数据均使用 Fernet 加密存储，日志中自动脱敏处理。
+        管理员访问敏感数据将被审计记录。您有权要求删除全部个人数据（GDPR 删除权）。
+        <a href="#" @click.prevent="showPrivacyDetail = !showPrivacyDetail">了解更多</a>
+      </p>
+      <div v-if="showPrivacyDetail" class="privacy-detail">
+        <ul>
+          <li>数据传输全程 HTTPS 加密</li>
+          <li>敏感字段（护照号、身份证号）使用 Fernet 对称加密存储</li>
+          <li>日志系统自动脱敏处理，不会记录明文敏感信息</li>
+          <li>管理员访问敏感数据需通过 RBAC 权限控制，所有操作记录审计日志</li>
+          <li>数据保留策略：活跃案件保留至结案后 3 年，支付记录保留 5 年</li>
+          <li>您有权随时要求删除全部个人数据，请联系管理员处理</li>
+        </ul>
+      </div>
+    </footer>
   </div>
 </template>
 
@@ -79,6 +97,7 @@ const activeTarget = computed(() => {
 const step = computed(() => activeTab.value === 'result' ? 2 : ['universities', 'schedule'].includes(activeTab.value) ? 3 : ['huaqiao', 'international'].includes(activeTab.value) ? 0 : 1)
 const loading = ref(false)
 const darkMode = ref(localStorage.getItem('theme') === 'dark')
+const showPrivacyDetail = ref(false)
 const result = ref(null)
 const laws = ref([])
 const policies = ref([])

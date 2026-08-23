@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.types import JSON
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -21,6 +22,7 @@ class User(Base):
     name = Column(String(80), default="")
     password_hash = Column(String(160), nullable=False)
     role = Column(String(30), default="member")
+    permissions = Column(JSON, default=list)  # R4.3 FIX: fine-grained permissions e.g. ["sensitive_data_access"]
     plan_code = Column(String(40), default="free", index=True)
     membership_until = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
