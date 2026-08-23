@@ -9,6 +9,26 @@ venv/
 
 *.db
 *.sqlite
+
+# Secrets and keys
+*.pem
+*.key
+*secret*
+!*.example
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+*.backup
+db_backups/
+*.sqlite
 *.sqlite3
 
 node_modules/

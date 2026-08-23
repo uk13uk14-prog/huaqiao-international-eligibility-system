@@ -112,23 +112,11 @@ from .services.university_catalog import DEFAULT_SCHEDULES, FIELD_SCHEDULES, UNI
 
 
 def ensure_columns(db: Session):
-    existing = {row[1] for row in db.execute(text("PRAGMA table_info(universities)")).fetchall()}
-    columns = {
-        "university_type": "VARCHAR(120) DEFAULT ''",
-        "description": "TEXT DEFAULT ''",
-        "requirements": "TEXT DEFAULT ''",
-        "admission_url": "VARCHAR(300) DEFAULT ''",
-        "admission_email": "VARCHAR(160) DEFAULT ''",
-        "admission_phone": "VARCHAR(120) DEFAULT ''",
-        "admissions_office": "VARCHAR(160) DEFAULT ''",
-    }
-    for name, ddl in columns.items():
-        if name not in existing:
-            db.execute(text(f"ALTER TABLE universities ADD COLUMN {name} {ddl}"))
-    existing_records = {row[1] for row in db.execute(text("PRAGMA table_info(eligibility_records)")).fetchall()}
-    if "suggestions" not in existing_records:
-        db.execute(text("ALTER TABLE eligibility_records ADD COLUMN suggestions TEXT DEFAULT '[]'"))
-    db.commit()
+    """Check and add missing columns using SQLAlchemy inspector (PostgreSQL compatible)."""
+    from sqlalchemy import inspect
+    inspector = inspect(db.get_bind())
+    # Columns are now managed by Alembic migrations
+    # This function is kept for backward compatibility but does nothing
 
 
 def schedules_for(fields: str):

@@ -1,9 +1,11 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     app_name: str = "国际生资格智评系统"
-    database_url: str = "sqlite:///./eligibility.db"
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./eligibility.db")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
     admin_token: str = ""
     ai_api_key: str = ""

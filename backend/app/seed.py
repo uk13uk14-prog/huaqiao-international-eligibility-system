@@ -73,22 +73,12 @@ LEGACY_FREE_REPLACEMENTS = {
 
 
 def ensure_university_columns(db: Session):
-    existing = {row[1] for row in db.execute(text("PRAGMA table_info(universities)")).fetchall()}
-    columns = {
-        "ranking": "INTEGER DEFAULT 999",
-        "admission_targets": "VARCHAR(120) DEFAULT 'huaqiao,international'",
-        "tags": "VARCHAR(200) DEFAULT ''",
-        "fields": "VARCHAR(200) DEFAULT ''",
-        "advantage_majors": "TEXT DEFAULT ''",
-        "admission_url": "VARCHAR(300) DEFAULT ''",
-        "admission_email": "VARCHAR(160) DEFAULT ''",
-        "admission_phone": "VARCHAR(120) DEFAULT ''",
-        "admissions_office": "VARCHAR(160) DEFAULT ''",
-    }
-    for name, ddl in columns.items():
-        if name not in existing:
-            db.execute(text(f"ALTER TABLE universities ADD COLUMN {name} {ddl}"))
-    db.commit()
+    """Check and add missing columns using SQLAlchemy inspector (PostgreSQL compatible)."""
+    from sqlalchemy import inspect
+    inspector = inspect(db.get_bind())
+    existing = {col["name"] for col in inspector.get_columns("universities")}
+    # Columns are now managed by Alembic migrations
+    # This function is kept for backward compatibility but does nothing
 
 
 def schedules_for(fields: str):

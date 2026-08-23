@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -5,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "国际生资格智评系统 SaaS Pro"
     env: str = "development"
-    database_url: str = "sqlite:///./saas_pro.db"
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./saas_pro.db")
     cors_origins: str = "http://localhost:5180,http://127.0.0.1:5180,http://localhost:5174,http://127.0.0.1:5174"
     jwt_secret_key: str = "change-me-in-production"
     vault_fernet_key: str = ""
@@ -16,7 +17,13 @@ class Settings(BaseSettings):
     public_base_url: str = "http://127.0.0.1:8010"
     frontend_base_url: str = "http://127.0.0.1:5180"
     wechat_pay_enabled: bool = False
+    wechat_pay_mch_id: str = ""
+    wechat_pay_api_v3_key: str = ""
+    wechat_pay_serial_no: str = ""
+    wechat_pay_public_key: str = ""  # WeChat Pay platform certificate public key (PEM)
     alipay_enabled: bool = False
+    alipay_app_id: str = ""
+    alipay_public_key: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig")
 

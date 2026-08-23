@@ -193,11 +193,19 @@ def mock_pay(order_no: str, user: User = Depends(get_current_user), db: Session 
 
 
 @app.post("/api/payments/notify/wechat")
-def wechat_notify(payload: dict, db: Session = Depends(get_db)):
-    order_no = payload.get("out_trade_no") or payload.get("order_no")
-    provider_trade_no = payload.get("transaction_id", "")
-    if not order_no:
-        raise HTTPException(status_code=400, detail="缺少订单号")
+async def wechat_notify(request: Request, db: Session = Depends(get_db)):
+    from .services.payment_verify import verify_wechat_callback
+    settings = get_settings()
+    body = await request.body()
+    try:
+        order_no, amount, provider_trade_no = verify_wechat_callback(
+            body=body,
+            headers=dict(request.headers),
+            mch_id=settings.wechat_pay_mch_id,
+            api_v3_key=settings.wechat_pay_api_v3_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         paid = mark_payment_paid(db, order_no, provider_trade_no=provider_trade_no)
     except ValueError as exc:
@@ -206,11 +214,22 @@ def wechat_notify(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.post("/api/payments/notify/alipay")
-def alipay_notify(payload: dict, db: Session = Depends(get_db)):
-    order_no = payload.get("out_trade_no") or payload.get("order_no")
-    provider_trade_no = payload.get("trade_no", "")
-    if not order_no:
-        raise HTTPException(status_code=400, detail="缺少订单号")
+async def alipay_notify(request: Request, db: Session = Depends(get_db)):
+    from .services.payment_verify import verify_alipay_callback
+    settings = get_settings()
+    body = await request.body()
+    form_data = {}
+    try:
+        form_data = dict(await request.form())
+    except Exception:
+        pass
+    try:
+        order_no, amount, provider_trade_no = verify_alipay_callback(
+            form_data=form_data,
+            alipay_public_key=settings.alipay_public_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         paid = mark_payment_paid(db, order_no, provider_trade_no=provider_trade_no)
     except ValueError as exc:

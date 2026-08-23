@@ -32,7 +32,7 @@ class AuthToken(Base):
     __tablename__ = "auth_tokens"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
-    token = Column(String(120), unique=True, index=True, nullable=False)
+    token = Column(String(500), unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: huaqiao
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: huaqiao_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps
+        run: |
+          cd backend && pip install -r requirements-locked.txt
+          cd ../huaqiao-saas-pro/backend && pip install -r requirements-locked.txt
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgresql+psycopg://huaqiao:test@localhost:5432/huaqiao_free
+          ADMIN_TOKEN: test-admin-token
+          ENV: development
+        run: cd backend && python -m pytest tests/ -v
+      - name: Run saas-pro tests
+        env:
+          DATABASE_URL: postgresql+psycopg://huaqiao:test@localhost:5432/huaqiao_saas
+          JWT_SECRET_KEY: test-jwt-key
+          VAULT_FERNET_KEY: ${{ secrets.VAULT_FERNET_KEY }}
+        run: cd huaqiao-saas-pro/backend && python -m pytest tests/ -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+      - name: Build huaqiao-app
+        run: cd huaqiao-app && npm ci && npm run build
+      - name: Build saas-pro frontend
+        run: cd huaqiao-saas-pro/frontend && npm ci && npm run build
+
+  alembic-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: huaqiao
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: huaqiao_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check migrations
+        env:
+          DATABASE_URL: postgresql+psycopg://huaqiao:test@localhost:5432/huaqiao_free
+        run: |
+          cd backend && pip install -r requirements-locked.txt
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
