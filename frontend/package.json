@@ -1,12 +1,79 @@
 {
-  "name": "huaqiao-international-eligibility-frontend",
+  "name": "huaqiao-eligibility",
   "version": "1.0.0",
   "private": true,
+  "description": "华侨生国际生资格智能判定系统",
+  "author": "Huaqiao Team",
+  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "electron:dev": "NODE_ENV=development electron .",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build:win": "npm run build && electron-builder --win --x64",
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "backend:build": "cd ../backend && pyinstaller huaqiao-backend.spec --clean --noconfirm",
+    "backend:build:win": "cd ../backend && pyinstaller huaqiao-backend.spec --clean --noconfirm --target-arch x64",
+    "dist:build": "npm run backend:build && npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.huaqiao.eligibility",
+    "productName": "华侨生资格判定系统",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/huaqiao-backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "华侨生资格判定系统",
+      "installerIcon": "public/favicon.ico",
+      "uninstallerIcon": "public/favicon.ico",
+      "installerHeaderIcon": "public/favicon.ico",
+      "artifactName": "HuaqiaoEligibilitySetup-${version}-r1.exe"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/favicon.ico",
+      "category": "public.app-category.education"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "public/icon-512x512.png",
+      "category": "Education"
+    }
   },
   "dependencies": {
     "@element-plus/icons-vue": "latest",
@@ -15,6 +82,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "latest",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "electron-squirrel-startup": "^1.0.1",
     "vite": "latest"
   }
 }
