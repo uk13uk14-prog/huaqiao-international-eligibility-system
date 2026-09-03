@@ -14,19 +14,30 @@
       <el-card class="auth-card">
         <el-tabs v-model="authTab">
           <el-tab-pane :label="text.login" name="login">
-            <el-form label-position="top">
-              <el-form-item :label="text.email"><el-input v-model="login.email" /></el-form-item>
-              <el-form-item :label="text.password"><el-input v-model="login.password" type="password" show-password /></el-form-item>
-              <el-button type="primary" size="large" :loading="loading" @click="doLogin">{{ text.loginButton }}</el-button>
+            <el-form data-testid="login-form" label-position="top" @submit.prevent="doLogin">
+              <el-form-item :label="text.email">
+                <el-input v-model="login.email" data-testid="login-email" autocomplete="username" />
+              </el-form-item>
+              <el-form-item :label="text.password">
+                <el-input v-model="login.password" type="password" show-password data-testid="login-password" autocomplete="current-password" />
+              </el-form-item>
+              <el-button
+                type="primary"
+                size="large"
+                native-type="submit"
+                data-testid="login-submit"
+                :loading="loading"
+                :disabled="loading"
+              >{{ text.loginButton }}</el-button>
             </el-form>
           </el-tab-pane>
           <el-tab-pane :label="text.register" name="register">
-            <el-form label-position="top">
+            <el-form data-testid="register-form" label-position="top" @submit.prevent="doRegister">
               <el-form-item :label="text.tenantName"><el-input v-model="register.tenant_name" /></el-form-item>
-              <el-form-item label="邮箱"><el-input v-model="register.email" /></el-form-item>
-              <el-form-item label="密码"><el-input v-model="register.password" type="password" show-password /></el-form-item>
+              <el-form-item label="邮箱"><el-input v-model="register.email" autocomplete="username" /></el-form-item>
+              <el-form-item label="密码"><el-input v-model="register.password" type="password" show-password autocomplete="new-password" /></el-form-item>
               <el-form-item :label="text.accountType"><el-select v-model="register.tenant_type"><el-option :label="text.personal" value="personal"/><el-option :label="text.agency" value="agency"/></el-select></el-form-item>
-              <el-button type="primary" size="large" :loading="loading" @click="doRegister">{{ text.registerButton }}</el-button>
+              <el-button type="primary" size="large" native-type="submit" data-testid="register-submit" :loading="loading" :disabled="loading">{{ text.registerButton }}</el-button>
             </el-form>
           </el-tab-pane>
         </el-tabs>
@@ -171,7 +182,7 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, setToken } from './api'
+import { api, clearToken, setToken, syncTokenFromStorage } from './api'
 import {
   accessibleStudents,
   activeStudentId,
@@ -255,10 +266,63 @@ function formatPlanDuration(p) {
   return `${d} 天`
 }
 
-async function boot(){ try{ user.value = await api.me(); await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch{} }
-async function doLogin(){ loading.value=true; try{ const r=await api.login(login.value); setToken(r.token); user.value=r.user; await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-async function doRegister(){ loading.value=true; try{ const r=await api.register(register.value); setToken(r.token); user.value=r.user; await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-function logout(){ clearActiveStudent(); localStorage.removeItem('saas_token'); location.reload() }
+async function boot(){
+  if (!syncTokenFromStorage()) return
+  try {
+    user.value = await api.me()
+    await refreshStudentSwitcher()
+    await loadTab('internationalDashboard')
+  } catch {
+    clearToken()
+    user.value = null
+  }
+}
+async function doLogin() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const email = (login.value.email || '').trim()
+    const password = login.value.password || ''
+    if (!email || !password) {
+      ElMessage.warning('请输入邮箱和密码')
+      return
+    }
+    const r = await api.login({ email, password })
+    if (!r?.token) throw new Error('登录响应缺少 token')
+    setToken(r.token)
+    user.value = r.user
+    try {
+      await refreshStudentSwitcher()
+    } catch { /* students optional at login */ }
+    await loadTab('internationalDashboard')
+  } catch (e) {
+    ElMessage.error(e.message || '登录失败')
+  } finally {
+    loading.value = false
+  }
+}
+async function doRegister() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const r = await api.register(register.value)
+    if (!r?.token) throw new Error('注册响应缺少 token')
+    setToken(r.token)
+    user.value = r.user
+    try { await refreshStudentSwitcher() } catch { /* optional */ }
+    await loadTab('internationalDashboard')
+  } catch (e) {
+    ElMessage.error(e.message || '注册失败')
+  } finally {
+    loading.value = false
+  }
+}
+function logout() {
+  clearActiveStudent()
+  clearToken()
+  user.value = null
+  location.reload()
+}
 function startJudge(type){ judgeType.value=type; tab.value='judge'; target.value=type; applyJudgeDefaults(type) }
 function applyJudgeDefaults(type){
   if(type==='huaqiao') Object.assign(form.value, {has_chinese_nationality:true, has_foreign_nationality:false, settled_abroad:true, has_mainland_household:false, overseas_residence_months_last_2y:18, overseas_residence_months_last_4y:0, annual_months_overseas:0, has_denationalization_certificate:false})

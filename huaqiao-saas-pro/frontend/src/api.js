@@ -1,8 +1,37 @@
 const API_BASE = import.meta.env.VITE_API_BASE || ''
-let token = localStorage.getItem('saas_token') || ''
-export function setToken(value) { token = value; localStorage.setItem('saas_token', value) }
+export const TOKEN_STORAGE_KEY = 'saas_token'
+let token = localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+
+/** Keep in-memory token aligned with localStorage (refresh / multi-tab / manual set). */
+export function syncTokenFromStorage() {
+  token = localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+  return token
+}
+
+export function getToken() {
+  return syncTokenFromStorage()
+}
+
+export function setToken(value) {
+  token = value || ''
+  if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token)
+  else localStorage.removeItem(TOKEN_STORAGE_KEY)
+}
+
+export function clearToken() {
+  setToken('')
+}
+
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) }, ...options })
+  const auth = getToken()
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(auth ? { Authorization: `Bearer ${auth}` } : {}),
+      ...(options.headers || {}),
+    },
+    ...options,
+  })
   if (!response.ok) {
     const text = await response.text()
     try {
