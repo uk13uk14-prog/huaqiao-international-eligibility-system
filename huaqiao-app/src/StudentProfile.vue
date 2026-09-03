@@ -3,7 +3,7 @@
     <van-cell-group inset>
       <van-cell title="当前学生" :value="currentLabel" />
       <van-field
-        v-if="hasMultipleStudents"
+        v-if="students.length > 1"
         label="切换学生"
         is-link
         readonly
@@ -19,10 +19,12 @@
         <van-button v-if="!canCreate" block round plain type="primary" style="margin-top:8px;" @click="emit('goto-member')">升级套餐</van-button>
       </div>
     </van-cell-group>
-    <van-popup v-model:show="showPicker" position="bottom">
+    <van-popup v-model:show="showPicker" position="bottom" round>
       <van-picker
+        v-if="showPicker"
+        :key="`profile-picker-${normalizeStudentId(activeStudentId) || 'none'}-${pickerEpoch}`"
         :columns="studentColumns"
-        :default-index="pickerDefaultIndex"
+        :model-value="profilePickerSelectedValues"
         @confirm="onPickStudent"
         @cancel="showPicker=false"
       />
@@ -255,11 +257,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
 import {
   activeStudentId,
-  hasMultipleStudents,
   loadForActiveStudent,
   normalizeStudentId,
-  setActiveStudentId,
   studentLabel,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import { getSaasToken, saasApi } from './saasApi'
@@ -293,6 +294,7 @@ const section = ref('summary')
 const saving = ref(false)
 const completeness = ref({ percent: 0, missing: [] })
 const showPicker = ref(false)
+const pickerEpoch = ref(0)
 const timeline = ref([])
 const timelineGroups = ref({ overdue: [], next_30: [], next_90: [], later: [], completed: [] })
 const timelineSummary = ref({ overdue_count: 0, next_30_count: 0, next_90_count: 0, next_30: [], next_90: [] })
@@ -305,9 +307,9 @@ const wizardMode = computed(() => profile.value && !profile.value.wizard_complet
 const saveLabel = computed(() => wizardMode.value ? '保存并继续' : '保存修改')
 const currentLabel = computed(() => studentLabel(students.value, activeStudentId.value))
 const studentColumns = computed(() => students.value.map(s => ({ text: s.display_name || `学生 #${s.id}`, value: normalizeStudentId(s.id) })))
-const pickerDefaultIndex = computed(() => {
-  const idx = students.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
-  return idx >= 0 ? idx : 0
+const profilePickerSelectedValues = computed(() => {
+  const id = normalizeStudentId(activeStudentId.value)
+  return id != null ? [id] : []
 })
 const currentSchool = computed(() => {
   const list = profile.value?.education?.history || []
@@ -363,7 +365,7 @@ async function loadList() {
   }
   try {
     const r = await saasApi.students()
-    students.value = r.students || []
+    students.value = Array.isArray(r.students) ? r.students.slice() : []
     if (r.slots) slots.value = r.slots
     const resolved = syncStudentsAndActive(students.value)
     if (resolved && loadedStudentId.value !== resolved) await open(resolved)
@@ -378,7 +380,7 @@ async function createStudent() {
   }
   try {
     const r = await saasApi.createStudent({ wizard: true, profile: {} })
-    setActiveStudentId(r.id, { allowUnknown: true })
+    switchActiveStudent(r.id, { allowUnknown: true })
     apply(r)
     section.value = 'basic_info'
     await loadList()
@@ -388,21 +390,43 @@ async function createStudent() {
 async function open(id) {
   const nid = normalizeStudentId(id)
   if (!nid) return
-  setActiveStudentId(nid, { allowUnknown: true })
+  const listCount = students.value.length
+  switchActiveStudent(nid, { allowUnknown: true })
+  if (listCount > 0 && students.value.length !== listCount) {
+    students.value = students.value.slice(0, listCount)
+  }
   const result = await loadForActiveStudent(nid, (sid) => saasApi.student(sid))
   if (!result.ok) {
     if (result.reason === 'error') showFailToast(result.error?.message || '加载失败')
     return
   }
   apply(result.data)
+  if (section.value === 'portrait') await refreshPortrait()
+  if (section.value === 'my_timeline') await loadMyTimeline()
 }
 function openStudentPicker() {
+  pickerEpoch.value += 1
   showPicker.value = true
+}
+function extractPickerStudentId(payload) {
+  if (payload == null) return null
+  const fromOpt = payload?.selectedOptions?.[0]
+  if (fromOpt && typeof fromOpt === 'object') {
+    const id = normalizeStudentId(fromOpt.value ?? fromOpt.id)
+    if (id != null) return id
+  }
+  const fromValuesId = normalizeStudentId(payload?.selectedValues?.[0])
+  if (fromValuesId != null) return fromValuesId
+  if (Array.isArray(payload)) {
+    const first = payload[0]
+    if (first && typeof first === 'object') return normalizeStudentId(first.value ?? first.id)
+    return normalizeStudentId(first)
+  }
+  return normalizeStudentId(payload)
 }
 function onPickStudent(payload) {
   showPicker.value = false
-  const opt = payload?.selectedOptions?.[0]
-  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
+  const id = extractPickerStudentId(payload)
   if (id) open(id)
 }
 async function save(key) {
