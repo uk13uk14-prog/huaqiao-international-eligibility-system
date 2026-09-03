@@ -62,8 +62,20 @@ def auth_headers(client):
     )
     r = client.post("/api/auth/login", json={"email": email, "password": "pass1234"})
     if r.status_code != 200:
-        r = client.post("/api/auth/login", json={"email": "demo@example.com", "password": "demo123456"})
+        email = "demo@example.com"
+        r = client.post("/api/auth/login", json={"email": email, "password": "demo123456"})
     assert r.status_code == 200, r.text
+    from app.database import SessionLocal
+    from app.models import User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.student_profile_limit_override = 50
+            db.add(user)
+            db.commit()
+    finally:
+        db.close()
     token = r.json()["token"]
     return {"Authorization": f"Bearer {token}"}
 

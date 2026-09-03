@@ -17,6 +17,7 @@ from .schemas import (
 )
 from .services.security import get_current_user
 from .services.student_portrait import StudentPortraitService
+from .services.student_profile_entitlements import student_profile_entitlements
 from .services.student_profile import (
     SECTIONS,
     apply_eligibility_result,
@@ -106,8 +107,11 @@ def _payload(row: StudentMasterProfile, profile: dict | None = None, db: Session
         "display_name": row.display_name or display_name_of(doc),
         "schema_version": row.schema_version,
         "source": row.source,
+        "status": getattr(row, "status", None) or "ACTIVE",
         "created_at": row.created_at,
         "updated_at": row.updated_at,
+        "archived_at": getattr(row, "archived_at", None),
+        "deleted_at": getattr(row, "deleted_at", None),
         "profile": doc,
         "summary": profile_summary(doc),
         "completeness": completeness(doc),
@@ -134,7 +138,7 @@ def _payload(row: StudentMasterProfile, profile: dict | None = None, db: Session
     }
 
 
-def _owned(db: Session, user: User, student_id: int) -> StudentMasterProfile:
+def _owned(db: Session, user: User, student_id: int, *, allow_deleted: bool = False) -> StudentMasterProfile:
     row = (
         db.query(StudentMasterProfile)
         .filter(
@@ -145,6 +149,9 @@ def _owned(db: Session, user: User, student_id: int) -> StudentMasterProfile:
         .first()
     )
     if not row:
+        raise HTTPException(status_code=404, detail="学生档案不存在")
+    status = getattr(row, "status", None) or "ACTIVE"
+    if status == "DELETED" and not allow_deleted:
         raise HTTPException(status_code=404, detail="学生档案不存在")
     return row
 
@@ -162,6 +169,11 @@ def migrate_vault_if_needed(db: Session, user: User) -> None:
         return
     if not old:
         return
+    # Legacy migration creates the first seat — still respect entitlement.
+    try:
+        student_profile_entitlements.assert_can_create(db, user)
+    except HTTPException:
+        return
     profile = migrate_legacy_vault(old)
     row = StudentMasterProfile(
         user_id=user.id,
@@ -170,6 +182,7 @@ def migrate_vault_if_needed(db: Session, user: User) -> None:
         cipher_blob=encrypt_profile_json(profile),
         schema_version=2,
         source="legacy_vault",
+        status="ACTIVE",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -183,7 +196,10 @@ def list_students(user: User = Depends(get_current_user), db: Session = Depends(
     migrate_vault_if_needed(db, user)
     rows = (
         db.query(StudentMasterProfile)
-        .filter(StudentMasterProfile.user_id == user.id)
+        .filter(
+            StudentMasterProfile.user_id == user.id,
+            StudentMasterProfile.status != "DELETED",
+        )
         .order_by(StudentMasterProfile.updated_at.desc())
         .all()
     )
@@ -195,17 +211,20 @@ def list_students(user: User = Depends(get_current_user), db: Session = Depends(
                 "id": row.id,
                 "display_name": row.display_name or display_name_of(doc),
                 "source": row.source,
+                "status": getattr(row, "status", None) or "ACTIVE",
                 "updated_at": row.updated_at,
                 "summary": profile_summary(doc),
                 "completeness": completeness(doc),
                 "application_readiness": portrait_service.generate(doc, timeline_summary(_timeline_items_for(db, row.id, user.id)))["application_readiness"]["score"],
             }
         )
-    return {"students": items}
+    slots = student_profile_entitlements.usage(db, user)
+    return {"students": items, "slots": slots}
 
 
 @router.post("")
 def create_student(payload: StudentCreateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    student_profile_entitlements.assert_can_create(db, user)
     incoming = payload.profile or {}
     if incoming.get("basic_info") or incoming.get("schema_version") == 2:
         profile = normalize_profile(incoming)
@@ -220,13 +239,16 @@ def create_student(payload: StudentCreateIn, user: User = Depends(get_current_us
         cipher_blob=encrypt_profile_json(profile),
         schema_version=2,
         source="created",
+        status="ACTIVE",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _payload(row, profile, db)
+    out = _payload(row, profile, db)
+    out["slots"] = student_profile_entitlements.usage(db, user)
+    return out
 
 
 @router.get("/meta")
@@ -258,7 +280,45 @@ def student_meta():
 @router.get("/{student_id}")
 def get_student(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     row = _owned(db, user, student_id)
-    return _payload(row, db=db)
+    out = _payload(row, db=db)
+    out["slots"] = student_profile_entitlements.usage(db, user)
+    return out
+
+
+@router.post("/{student_id}/archive")
+def archive_student(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned(db, user, student_id)
+    row.status = "ARCHIVED"
+    row.archived_at = datetime.utcnow()
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": row.id,
+        "status": row.status,
+        "archived_at": row.archived_at,
+        "slots": student_profile_entitlements.usage(db, user),
+    }
+
+
+@router.post("/{student_id}/soft-delete")
+def soft_delete_student(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Soft delete — still consumes a seat; does not hard-delete data."""
+    row = _owned(db, user, student_id)
+    row.status = "DELETED"
+    row.deleted_at = datetime.utcnow()
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": row.id,
+        "status": row.status,
+        "deleted_at": row.deleted_at,
+        "slots": student_profile_entitlements.usage(db, user),
+        "note": "软删除档案仍计入当前套餐学生档案席位，无法通过删除绕过额度限制。",
+    }
 
 
 @router.patch("/{student_id}/sections/{section}")

@@ -3,20 +3,35 @@
     <div class="smp-head">
       <div>
         <p class="smp-eyebrow">国侨升学 · Student Master Profile</p>
-        <h2>学生档案</h2>
+        <h2>学生档案 <span class="smp-slot">{{ slots.student_profile_used || 0 }} / {{ slots.student_profile_limit || 0 }}</span></h2>
         <p class="muted">档案是升学规划数据中心。每页独立保存，判定结果需确认后才写入身份状态。</p>
       </div>
       <div class="smp-head-actions">
         <el-button @click="loadList">刷新</el-button>
-        <el-button type="primary" @click="createStudent">创建学生</el-button>
+        <el-button type="primary" :disabled="!canCreate" @click="createStudent">创建学生</el-button>
+        <span v-if="canCreate" class="muted">剩余 {{ slots.student_profile_remaining || 0 }} 个名额</span>
       </div>
     </div>
+
+    <el-alert
+      v-if="!canCreate"
+      class="smp-limit-alert"
+      type="warning"
+      :closable="false"
+      :title="limitHint"
+    >
+      <template #default>
+        <p>{{ limitHint }}</p>
+        <el-button type="primary" link @click="emit('goto-member')">升级套餐</el-button>
+      </template>
+    </el-alert>
 
     <div class="smp-student-bar">
       <el-select v-model="studentId" placeholder="选择学生" filterable style="min-width:240px" @change="openStudent">
         <el-option v-for="s in students" :key="s.id" :label="`${s.display_name}（完整度 ${s.completeness?.percent || 0}%）`" :value="s.id" />
       </el-select>
       <el-tag v-if="profile" type="info">{{ wizardMode ? '建档向导' : '档案管理' }}</el-tag>
+      <el-tag v-if="slots.student_profile_over_quota" type="warning">超额 {{ slots.student_profile_over_quota }}（已有档案可继续查看编辑）</el-tag>
     </div>
 
     <template v-if="profile">
@@ -420,7 +435,7 @@ import { ElMessage } from 'element-plus'
 import { api } from './api'
 import { CURRICULUMS, GRADE_TYPES, LANGUAGE_EXAMS, OTHER_EXAM_TYPES, PRIORITY_LEVELS, SCHOOL_TYPES, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
-const emit = defineEmits(['goto-judge'])
+const emit = defineEmits(['goto-judge', 'goto-member'])
 
 const sections = SECTIONS
 const wizardSections = WIZARD_SECTIONS
@@ -445,6 +460,13 @@ const studentId = ref(null)
 const profile = ref(null)
 const portrait = ref(null)
 const dashboard = ref(null)
+const slots = ref({
+  student_profile_limit: 1,
+  student_profile_used: 0,
+  student_profile_remaining: 1,
+  student_profile_over_quota: 0,
+  can_create_student: true,
+})
 const section = ref('summary')
 const saving = ref(false)
 const completeness = ref({ percent: 0, missing: [] })
@@ -461,6 +483,12 @@ const wizardIndex = computed(() => Math.max(0, wizardSections.findIndex(s => s.k
 const saveLabel = computed(() => wizardMode.value ? '保存并继续' : '保存修改')
 const readinessScore = computed(() => portrait.value?.application_readiness?.score ?? dashboard.value?.application_readiness?.score ?? 0)
 const targetCounts = computed(() => portrait.value?.targets?.counts || dashboard.value?.targets || { reach: 0, target: 0, match: 0, safety: 0 })
+const canCreate = computed(() => !!slots.value.can_create_student)
+const limitHint = computed(() => {
+  const lim = slots.value.student_profile_limit || 0
+  const used = slots.value.student_profile_used || 0
+  return `当前套餐最多可建立 ${lim} 个学生档案，已使用 ${used}/${lim}。如需管理更多学生，请升级套餐。`
+})
 const currentSchool = computed(() => {
   const list = profile.value?.education?.history || []
   return list.find(s => s.is_current) || list[0]
@@ -493,18 +521,28 @@ function goSection(key) {
 async function loadList() {
   const r = await api.students()
   students.value = r.students || []
+  if (r.slots) slots.value = r.slots
   if (!studentId.value && students.value[0]) {
     studentId.value = students.value[0].id
     await openStudent(studentId.value)
   }
 }
 async function createStudent() {
-  const r = await api.createStudent({ wizard: true, profile: {} })
-  studentId.value = r.id
-  applyPayload(r)
-  section.value = 'basic_info'
-  await loadList()
-  ElMessage.success('已创建学生，可开始建档向导')
+  if (!canCreate.value) {
+    ElMessage.warning(limitHint.value)
+    return
+  }
+  try {
+    const r = await api.createStudent({ wizard: true, profile: {} })
+    studentId.value = r.id
+    applyPayload(r)
+    if (r.slots) slots.value = r.slots
+    section.value = 'basic_info'
+    await loadList()
+    ElMessage.success('已创建学生，可开始建档向导')
+  } catch (e) {
+    ElMessage.error(e.message || '创建失败')
+  }
 }
 async function openStudent(id) {
   if (!id) return
@@ -516,6 +554,7 @@ function applyPayload(r) {
   completeness.value = r.completeness || { percent: 0, missing: [] }
   portrait.value = r.portrait || null
   dashboard.value = r.dashboard || null
+  if (r.slots) slots.value = r.slots
   if (r.dashboard?.timeline_summary) timelineSummary.value = r.dashboard.timeline_summary
   else if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
 }

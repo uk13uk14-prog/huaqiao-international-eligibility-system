@@ -20,6 +20,8 @@
 .smp-facts { line-height: 1.8; }
 .smp-complete { display: flex; gap: 18px; align-items: center; margin-bottom: 16px; }
 .smp-steps { margin-bottom: 16px; }
+.smp-slot { font-size: 0.72em; color: #5a6f8c; font-weight: 600; margin-left: 8px; }
+.smp-limit-alert { margin-bottom: 12px; }
 .smp-dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
 .smp-dash-block { background: #fff; border: 1px solid #eadfcd; border-radius: 14px; padding: 12px 14px; overflow: hidden; }
 .smp-dash-block h4 { margin: 0 0 8px; color: #123c69; }

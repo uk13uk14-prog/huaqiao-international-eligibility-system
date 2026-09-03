@@ -25,6 +25,7 @@ from .models import (
     Order,
     PaymentOrder,
     RechargeCode,
+    StudentMasterProfile,
     Tenant,
     University,
     User,
@@ -132,9 +133,9 @@ def health():
     return {"status": "ok", "app": settings.app_name}
 
 
-def user_payload(user: User):
-    fs = feature_summary(user)
-    return {"id": user.id, "tenant_id": user.tenant_id, "email": user.email, "name": user.name, "role": user.role, "plan_code": user.plan_code, "membership_until": user.membership_until.isoformat() if user.membership_until else None, "paid": fs["paid"], "features": fs}
+def user_payload(user: User, db: Session | None = None):
+    fs = feature_summary(user, db)
+    return {"id": user.id, "tenant_id": user.tenant_id, "email": user.email, "name": user.name, "role": user.role, "plan_code": user.plan_code, "membership_until": user.membership_until.isoformat() if user.membership_until else None, "paid": fs["paid"], "features": fs, "student_profile_limit_override": getattr(user, "student_profile_limit_override", None)}
 
 
 @app.post("/api/auth/register")
@@ -147,7 +148,7 @@ def register(request: Request, data: RegisterIn, db: Session = Depends(get_db)):
     user = User(tenant_id=tenant.id, email=data.email, name=data.name or data.email, password_hash=hash_password(data.password), role="member", plan_code="free")
     db.add(user); db.commit(); db.refresh(user)
     token = create_token(db, user)
-    return {"token": token, "user": user_payload(user)}
+    return {"token": token, "user": user_payload(user, db)}
 
 
 @app.post("/api/auth/login")
@@ -165,12 +166,32 @@ def login(request: Request, data: LoginIn, db: Session = Depends(get_db)):
             db.commit()
         else:
             raise HTTPException(status_code=401, detail="账号或密码错误")
-    return {"token": create_token(db, user), "user": user_payload(user)}
+    return {"token": create_token(db, user), "user": user_payload(user, db)}
 
 
 @app.get("/api/me")
-def me(user: User = Depends(get_current_user)):
-    return user_payload(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return user_payload(user, db)
+
+
+@app.get("/api/membership/entitlements")
+def membership_entitlements(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Extended membership entitlements including student profile seats."""
+    e = entitlements(user, db)
+    return {
+        "plan_code": user.plan_code,
+        "paid": is_paid(user),
+        "student_profile_limit": e["student_profile_limit"],
+        "student_profile_used": e.get("student_profile_used", 0),
+        "student_profile_remaining": e.get("student_profile_remaining", 0),
+        "student_profile_over_quota": e.get("student_profile_over_quota", 0),
+        "can_create_student": e.get("can_create_student", False),
+        "university_limit": e["university_limit"],
+        "recommend_limit": e["recommend_limit"],
+        "record_limit": e["record_limit"],
+        "report_export": e["report_export"],
+        "features": feature_summary(user, db),
+    }
 
 
 @app.get("/api/plans")
@@ -191,7 +212,7 @@ def redeem(data: RedeemIn, user: User = Depends(get_current_user), db: Session =
     code.is_used = True; code.used_by = user.id; code.used_at = datetime.utcnow()
     db.add(Order(tenant_id=user.tenant_id, user_id=user.id, plan_code=code.plan_code, amount=0, status="paid", source="recharge_code"))
     db.commit(); db.refresh(user)
-    return {"message": "开通成功", "user": user_payload(user)}
+    return {"message": "开通成功", "user": user_payload(user, db)}
 
 
 @app.get("/api/billing/orders")
@@ -238,7 +259,7 @@ def mock_pay(order_no: str, user: User = Depends(get_current_user), db: Session 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.refresh(user)
-    return {"message": "模拟支付成功，会员已自动开通", "payment": {"order_no": paid.order_no, "status": paid.status}, "user": user_payload(user)}
+    return {"message": "模拟支付成功，会员已自动开通", "payment": {"order_no": paid.order_no, "status": paid.status}, "user": user_payload(user, db)}
 
 
 @app.post("/api/payments/notify/wechat")
@@ -845,6 +866,59 @@ def admin_reminder_list(user_id: int | None = None, _: User = Depends(require_ad
 @app.get("/api/admin/users")
 def admin_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     return db.query(User).order_by(User.created_at.desc()).all()
+
+
+@app.patch("/api/admin/users/{user_id}/student-profile-limit")
+def admin_set_student_profile_limit(
+    user_id: int,
+    payload: dict,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Account-level override for student_profile_limit. Pass null to clear."""
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if "student_profile_limit_override" not in payload:
+        raise HTTPException(status_code=400, detail="缺少 student_profile_limit_override")
+    value = payload.get("student_profile_limit_override")
+    if value is None:
+        target.student_profile_limit_override = None
+    else:
+        try:
+            ivalue = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="student_profile_limit_override 必须是整数或 null") from exc
+        if ivalue < 0:
+            raise HTTPException(status_code=400, detail="override 不能为负数")
+        target.student_profile_limit_override = ivalue
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    from .services.student_profile_entitlements import student_profile_entitlements
+
+    return {
+        "user_id": target.id,
+        "email": target.email,
+        "plan_code": target.plan_code,
+        "student_profile_limit_override": target.student_profile_limit_override,
+        "slots": student_profile_entitlements.usage(db, target),
+    }
+
+
+@app.post("/api/admin/students/{student_id}/restore")
+def admin_restore_student(student_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    row = db.query(StudentMasterProfile).filter(StudentMasterProfile.id == student_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="学生档案不存在")
+    row.status = "ACTIVE"
+    row.deleted_at = None
+    row.archived_at = None
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "status": row.status, "user_id": row.user_id}
 
 
 @app.get("/api/admin/plans")

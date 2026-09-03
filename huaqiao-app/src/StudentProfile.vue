@@ -2,8 +2,12 @@
   <div class="smp-mobile">
     <van-cell-group inset>
       <van-field label="学生" is-link readonly :model-value="currentLabel" @click="showPicker = true" />
+      <van-cell title="学生档案席位" :value="`${slots.student_profile_used || 0} / ${slots.student_profile_limit || 0}`" />
+      <van-cell v-if="canCreate" title="剩余名额" :value="`${slots.student_profile_remaining || 0}`" />
       <div class="consult-actions" style="padding:12px;">
-        <van-button block round type="primary" @click="createStudent">创建学生</van-button>
+        <van-button block round type="primary" :disabled="!canCreate" @click="createStudent">创建学生</van-button>
+        <p v-if="!canCreate" class="confirm-hint" style="margin-top:10px;">{{ limitHint }}</p>
+        <van-button v-if="!canCreate" block round plain type="primary" style="margin-top:8px;" @click="emit('goto-member')">升级套餐</van-button>
       </div>
     </van-cell-group>
     <van-popup v-model:show="showPicker" position="bottom">
@@ -238,7 +242,7 @@ import { showFailToast, showSuccessToast } from 'vant'
 import { getSaasToken, saasApi } from './saasApi'
 import { PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
-const emit = defineEmits(['goto-judge'])
+const emit = defineEmits(['goto-judge', 'goto-member'])
 const sections = SECTIONS
 const wizardSections = WIZARD_SECTIONS
 const priorityLevels = PRIORITY_LEVELS
@@ -255,6 +259,13 @@ const students = ref([])
 const studentId = ref(null)
 const profile = ref(null)
 const portrait = ref(null)
+const slots = ref({
+  student_profile_limit: 1,
+  student_profile_used: 0,
+  student_profile_remaining: 1,
+  student_profile_over_quota: 0,
+  can_create_student: true,
+})
 const section = ref('summary')
 const saving = ref(false)
 const completeness = ref({ percent: 0, missing: [] })
@@ -277,6 +288,12 @@ const currentSchool = computed(() => {
 })
 const readinessScore = computed(() => portrait.value?.application_readiness?.score ?? 0)
 const targetCounts = computed(() => portrait.value?.targets?.counts || { reach: 0, target: 0, match: 0, safety: 0 })
+const canCreate = computed(() => !!slots.value.can_create_student)
+const limitHint = computed(() => {
+  const lim = slots.value.student_profile_limit || 0
+  const used = slots.value.student_profile_used || 0
+  return `当前套餐最多可建立 ${lim} 个学生档案，已使用 ${used}/${lim}。如需管理更多学生，请升级套餐。`
+})
 
 function targetsBy(level) { return (profile.value?.goals?.targets || []).filter(t => t.priority_level === level) }
 function countPri(level) { return targetsBy(level).length }
@@ -299,6 +316,7 @@ function apply(r) {
   profile.value = r.profile
   completeness.value = r.completeness || { percent: 0, missing: [] }
   portrait.value = r.portrait || null
+  if (r.slots) slots.value = r.slots
   if (r.dashboard?.timeline_summary) timelineSummary.value = r.dashboard.timeline_summary
   else if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
   curriculaText.value = (profile.value.courses.curricula || []).join(',')
@@ -319,12 +337,17 @@ async function loadList() {
   try {
     const r = await saasApi.students()
     students.value = r.students || []
+    if (r.slots) slots.value = r.slots
     if (students.value[0] && !studentId.value) await open(students.value[0].id)
   } catch (e) {
     showFailToast(e.message || '加载失败')
   }
 }
 async function createStudent() {
+  if (!canCreate.value) {
+    showFailToast(limitHint.value)
+    return
+  }
   try {
     const r = await saasApi.createStudent({ wizard: true, profile: {} })
     apply(r)

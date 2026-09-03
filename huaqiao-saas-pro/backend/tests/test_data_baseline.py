@@ -75,6 +75,7 @@ def auth_headers(client):
         assert user is not None
         user.plan_code = "pro_yearly"
         user.membership_until = datetime.utcnow() + timedelta(days=365)
+        user.student_profile_limit_override = 50
         db.add(user)
         db.commit()
     finally:

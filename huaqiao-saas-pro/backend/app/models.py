@@ -25,6 +25,7 @@ class User(Base):
     permissions = Column(JSON, default=list)  # R4.3 FIX: fine-grained permissions e.g. ["sensitive_data_access"]
     plan_code = Column(String(40), default="free", index=True)
     membership_until = Column(DateTime, nullable=True)
+    student_profile_limit_override = Column(Integer, nullable=True)  # account-level seat override
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     tenant = relationship("Tenant", back_populates="users")
@@ -168,8 +169,11 @@ class StudentMasterProfile(Base):
     cipher_blob = Column(Text, default="")
     schema_version = Column(Integer, default=2)
     source = Column(String(40), default="created")
+    status = Column(String(20), default="ACTIVE", index=True)  # ACTIVE | ARCHIVED | DELETED
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    archived_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
 
 
 class StudentTimelineItem(Base):

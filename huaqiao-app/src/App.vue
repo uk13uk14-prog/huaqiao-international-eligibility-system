@@ -162,7 +162,7 @@
       </section>
 
       <section v-if="tab === 'profile'" class="list-screen">
-        <StudentProfile @goto-judge="onGotoJudgeFromProfile" />
+        <StudentProfile @goto-judge="onGotoJudgeFromProfile" @goto-member="openPage('member')" />
       </section>
 
       <section v-if="tab === 'laws'" class="list-screen laws-screen">
