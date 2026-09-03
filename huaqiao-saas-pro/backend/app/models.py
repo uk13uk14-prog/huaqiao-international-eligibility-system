@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -25,6 +25,7 @@ class User(Base):
     permissions = Column(JSON, default=list)  # R4.3 FIX: fine-grained permissions e.g. ["sensitive_data_access"]
     plan_code = Column(String(40), default="free", index=True)
     membership_until = Column(DateTime, nullable=True)
+    student_profile_limit_override = Column(Integer, nullable=True)  # account-level seat override
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     tenant = relationship("Tenant", back_populates="users")
@@ -155,6 +156,48 @@ class CustomerVault(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
     cipher_blob = Column(Text, default="")
     schema_version = Column(Integer, default=1)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StudentMasterProfile(Base):
+    """Student Master Profile v2 — encrypted JSON document per student."""
+    __tablename__ = "student_master_profiles"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
+    display_name = Column(String(160), default="")
+    cipher_blob = Column(Text, default="")
+    schema_version = Column(Integer, default=2)
+    source = Column(String(40), default="created")
+    status = Column(String(20), default="ACTIVE", index=True)  # ACTIVE | ARCHIVED | DELETED
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    archived_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class StudentTimelineItem(Base):
+    """Per-student personalized timeline state. Public AdmissionSchedule is never mutated."""
+    __tablename__ = "student_timeline_items"
+    id = Column(Integer, primary_key=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
+    source_timeline_id = Column(Integer, ForeignKey("admission_schedules.id"), nullable=True, index=True)
+    title = Column(String(240), default="")
+    description = Column(Text, default="")
+    start_date = Column(Date, nullable=True)
+    deadline = Column(Date, nullable=True, index=True)
+    university_id = Column(Integer, ForeignKey("universities.id"), nullable=True)
+    university_name = Column(String(160), default="")
+    entry_year = Column(Integer, nullable=True)
+    application_route = Column(String(40), default="")
+    status = Column(String(30), default="NOT_STARTED", index=True)
+    completed_at = Column(DateTime, nullable=True)
+    student_note = Column(Text, default="")
+    is_manual = Column(Boolean, default=False, index=True)
+    needs_confirmation = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

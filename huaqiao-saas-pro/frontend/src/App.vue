@@ -14,19 +14,30 @@
       <el-card class="auth-card">
         <el-tabs v-model="authTab">
           <el-tab-pane :label="text.login" name="login">
-            <el-form label-position="top">
-              <el-form-item :label="text.email"><el-input v-model="login.email" /></el-form-item>
-              <el-form-item :label="text.password"><el-input v-model="login.password" type="password" show-password /></el-form-item>
-              <el-button type="primary" size="large" :loading="loading" @click="doLogin">{{ text.loginButton }}</el-button>
+            <el-form data-testid="login-form" label-position="top" @submit.prevent="doLogin">
+              <el-form-item :label="text.email">
+                <el-input v-model="login.email" data-testid="login-email" autocomplete="username" />
+              </el-form-item>
+              <el-form-item :label="text.password">
+                <el-input v-model="login.password" type="password" show-password data-testid="login-password" autocomplete="current-password" />
+              </el-form-item>
+              <el-button
+                type="primary"
+                size="large"
+                native-type="submit"
+                data-testid="login-submit"
+                :loading="loading"
+                :disabled="loading"
+              >{{ text.loginButton }}</el-button>
             </el-form>
           </el-tab-pane>
           <el-tab-pane :label="text.register" name="register">
-            <el-form label-position="top">
+            <el-form data-testid="register-form" label-position="top" @submit.prevent="doRegister">
               <el-form-item :label="text.tenantName"><el-input v-model="register.tenant_name" /></el-form-item>
-              <el-form-item label="邮箱"><el-input v-model="register.email" /></el-form-item>
-              <el-form-item label="密码"><el-input v-model="register.password" type="password" show-password /></el-form-item>
+              <el-form-item label="邮箱"><el-input v-model="register.email" autocomplete="username" /></el-form-item>
+              <el-form-item label="密码"><el-input v-model="register.password" type="password" show-password autocomplete="new-password" /></el-form-item>
               <el-form-item :label="text.accountType"><el-select v-model="register.tenant_type"><el-option :label="text.personal" value="personal"/><el-option :label="text.agency" value="agency"/></el-select></el-form-item>
-              <el-button type="primary" size="large" :loading="loading" @click="doRegister">{{ text.registerButton }}</el-button>
+              <el-button type="primary" size="large" native-type="submit" data-testid="register-submit" :loading="loading" :disabled="loading">{{ text.registerButton }}</el-button>
             </el-form>
           </el-tab-pane>
         </el-tabs>
@@ -37,7 +48,28 @@
     <template v-else>
       <header class="topbar">
         <div><h1>{{ text.systemName }}</h1><p>{{ user.email }} · {{ planText }}</p></div>
-        <div class="top-actions"><el-switch v-model="darkMode" class="theme-switch" size="small" inline-prompt :active-text="text.themeDark" :inactive-text="text.themeLight" @change="persistSaasTheme" /><el-button type="primary" plain @click="openConsultDialog">{{ text.consultPlanning }}</el-button><el-segmented v-model="lang" :options="langOptions" size="small"/><el-tag :type="user.features.paid ? 'success' : 'warning'">{{ user.plan_code }}</el-tag><el-button @click="logout">{{ text.logout }}</el-button></div>
+        <div class="top-actions">
+          <div v-if="accessibleStudents.length" class="student-switcher" data-testid="home-student-switcher">
+            <span class="student-switcher-label">当前学生</span>
+            <strong class="student-switcher-name">{{ activeStudentLabel }}</strong>
+            <el-dropdown v-if="hasMultipleStudents" trigger="click" @command="onHomeSwitchStudent">
+              <el-button size="small" type="primary" plain>切换</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="s in accessibleStudents"
+                    :key="s.id"
+                    :command="normalizeStudentId(s.id)"
+                    :disabled="normalizeStudentId(s.id) === activeStudentId"
+                  >
+                    <span :class="{ 'is-active-student': normalizeStudentId(s.id) === activeStudentId }">{{ s.display_name }}</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+          <el-switch v-model="darkMode" class="theme-switch" size="small" inline-prompt :active-text="text.themeDark" :inactive-text="text.themeLight" @change="persistSaasTheme" /><el-button type="primary" plain @click="openConsultDialog">{{ text.consultPlanning }}</el-button><el-segmented v-model="lang" :options="langOptions" size="small"/><el-tag :type="user.features.paid ? 'success' : 'warning'">{{ user.plan_code }}</el-tag><el-button @click="logout">{{ text.logout }}</el-button>
+        </div>
       </header>
       <main class="layout">
         <aside class="sidebar">
@@ -45,6 +77,7 @@
             <el-menu-item index="internationalDashboard">{{ text.internationalDashboard }}</el-menu-item>
             <el-menu-item index="huaqiaoDashboard">{{ text.huaqiaoDashboard }}</el-menu-item>
             <el-menu-item index="judge">{{ text.dualJudge }}</el-menu-item>
+            <el-menu-item index="studentProfile">学生档案</el-menu-item>
             <el-menu-item index="laws">{{ text.laws }}</el-menu-item>
             <el-menu-item index="universities">{{ text.universityLibrary }}</el-menu-item>
             <el-menu-item index="schedules">{{ text.schedules }}</el-menu-item>
@@ -71,7 +104,11 @@
             <div class="section-head"><div><h2>{{ judgeType==='international' ? text.internationalJudge : text.huaqiaoJudge }}</h2><p>{{ judgeType==='international' ? text.internationalJudgeDesc : text.huaqiaoJudgeDesc }}</p></div><el-radio-group v-model="judgeType"><el-radio-button label="international">{{ text.internationalJudge }}</el-radio-button><el-radio-button label="huaqiao">{{ text.huaqiaoJudge }}</el-radio-button></el-radio-group></div>
             <el-alert v-if="!user.features.full_elite_university_library" type="warning" :closable="false" title="免费版可完成基础判定，但推荐数量、名校库和报告导出受限。" />
             <el-card class="mt"><el-form label-position="top"><template v-if="judgeType==='international'"><el-alert type="info" :closable="false" title="国际生表格：重点核验外国国籍、中国国籍状态、退籍/国籍状态证明、近四年境外居住记录。"/><div class="form-grid"><el-form-item label="姓名"><el-input v-model="form.name"/></el-form-item><el-form-item label="出生日期"><el-input v-model="form.birth_date" placeholder="YYYY-MM-DD"/></el-form-item><el-form-item label="当前外国国籍"><el-input v-model="form.current_nationality"/></el-form-item><el-form-item label="外国国籍取得日期"><el-input v-model="form.foreign_nationality_acquired_date"/></el-form-item><el-form-item label="永久/长期居留地"><el-input v-model="form.permanent_residence_country"/></el-form-item><el-form-item label="意向专业领域"><el-select v-model="form.intended_field"><el-option v-for="f in fields" :key="f" :label="f" :value="f"/></el-select></el-form-item><el-form-item label="分数/成绩"><el-input-number v-model="form.score" :min="0" :max="750"/></el-form-item><el-form-item label="近4年海外月数"><el-input-number v-model="form.overseas_residence_months_last_4y" :min="0" :max="48"/></el-form-item><el-form-item label="单年最高海外月数"><el-input-number v-model="form.annual_months_overseas" :min="0" :max="12"/></el-form-item></div><div class="switches"><el-switch v-model="form.has_foreign_nationality" active-text="具有外国国籍"/><el-switch v-model="form.has_chinese_nationality" active-text="仍具有中国国籍"/><el-switch v-model="form.has_denationalization_certificate" active-text="已有退籍/国籍状态证明"/><el-switch v-model="form.settled_abroad" active-text="已定居国外"/><el-switch v-model="form.born_abroad" active-text="出生在外国"/><el-switch v-model="form.parent_chinese_citizen" active-text="父母一方中国公民"/><el-switch v-model="form.parent_settled_abroad_at_birth" active-text="出生时父母定居外国"/></div><el-form-item label="退籍证明/国籍状态证明说明"><el-input v-model="form.denationalization_certificate_info" type="textarea" rows="2" placeholder="如：户籍注销证明、退出中国国籍证书、使领馆/公安机关国籍状态说明等。国内相关证明通常建议预留约1年办理周期。"/></el-form-item><div class="report-actions"><el-button type="primary" plain @click="openConsultDialog">{{ text.consultPlanning }}</el-button></div></template><template v-else><el-alert type="success" :closable="false" title="华侨生表格：比国际生更简单，重点核验中国国籍、海外定居、近两年居住和户籍状态。"/><div class="form-grid"><el-form-item label="姓名"><el-input v-model="form.name"/></el-form-item><el-form-item label="出生日期"><el-input v-model="form.birth_date" placeholder="YYYY-MM-DD"/></el-form-item><el-form-item label="当前国籍"><el-input v-model="form.current_nationality"/></el-form-item><el-form-item label="永久/长期居留地"><el-input v-model="form.permanent_residence_country"/></el-form-item><el-form-item label="近2年海外月数"><el-input-number v-model="form.overseas_residence_months_last_2y" :min="0" :max="24"/></el-form-item><el-form-item label="意向专业领域"><el-select v-model="form.intended_field"><el-option v-for="f in fields" :key="f" :label="f" :value="f"/></el-select></el-form-item><el-form-item label="分数/成绩"><el-input-number v-model="form.score" :min="0" :max="750"/></el-form-item></div><div class="switches"><el-switch v-model="form.has_chinese_nationality" active-text="具有中国国籍"/><el-switch v-model="form.has_foreign_nationality" active-text="具有外国国籍"/><el-switch v-model="form.settled_abroad" active-text="已定居国外"/><el-switch v-model="form.has_mainland_household" active-text="仍有内地户籍"/></div></template><el-form-item label="复杂情况说明"><el-input v-model="form.complex_situation" type="textarea" rows="3"/></el-form-item><el-button type="primary" size="large" @click="submitJudge">提交判定</el-button></el-form></el-card>
-            <ResultPanel v-if="result" :result="result" :paid="user.features.report_export" @export="exportReport" @unlock="showUnlock" @open-contact="openConsultDialog" />
+            <ResultPanel v-if="result" :result="result" :paid="user.features.report_export" :can-writeback="!!profileStudentId" @export="exportReport" @unlock="showUnlock" @open-contact="openConsultDialog" @writeback="confirmJudgeWriteback" />
+          </section>
+
+          <section v-if="tab==='studentProfile'" class="page smp-page">
+            <StudentProfile ref="studentProfileRef" @goto-judge="onGotoJudgeFromProfile" @goto-member="tab='member'" />
           </section>
 
           <section v-if="tab==='laws'" class="page"><div class="section-head"><div><h2>{{ text.laws }}</h2><p>{{ text.lawsDesc }}</p></div><el-input v-model="lawKeyword" :placeholder="text.searchLaws" clearable @input="loadLaws" /></div><el-tabs v-model="lawView" class="law-tabs"><el-tab-pane :label="text.fullLawText" name="full"><el-card class="law-full"><h2>《中华人民共和国国籍法》</h2><p class="muted">{{ text.fullLawHint }}</p><article v-for="law in allLaws" :key="law.number" class="law-full-item"><h3>第{{law.number}}条</h3><p>{{law.text}}</p></article></el-card></el-tab-pane><el-tab-pane :label="text.moePolicy" name="policies"><div class="policy-list"><el-card v-for="doc in policies" :key="doc.id" class="policy-card"><div class="policy-head"><div><h2>{{doc.title}}</h2><p class="muted">{{doc.authority}} · {{doc.code}}</p></div><el-tag type="primary">{{ text.internationalCore }}</el-tag></div><p>{{doc.summary}}</p><el-alert type="warning" :closable="false" :title="doc.focus"/><article v-for="section in doc.sections" :key="section.heading" class="law-full-item"><h3>{{section.heading}}</h3><p>{{section.text}}</p></article></el-card></div></el-tab-pane><el-tab-pane :label="text.lawExplanation" name="cards"><div class="law-grid"><el-card v-for="law in laws" :key="law.number"><h3>第{{law.number}}条：{{law.title}}</h3><p>{{law.text}}</p><el-alert type="info" :closable="false" :title="law.explanation"/></el-card></div></el-tab-pane></el-tabs></section>
@@ -145,7 +182,18 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, setToken } from './api'
+import { api, clearToken, setToken, syncTokenFromStorage } from './api'
+import {
+  accessibleStudents,
+  activeStudentId,
+  activeStudentLabel,
+  clearActiveStudent,
+  hasMultipleStudents,
+  normalizeStudentId,
+  setActiveStudentId,
+  syncStudentsAndActive,
+} from './activeStudent'
+import StudentProfile from './StudentProfile.vue'
 
 const user = ref(null), loading = ref(false), authTab = ref('login'), tab = ref('internationalDashboard'), unlockVisible = ref(false)
 const darkMode = ref(localStorage.getItem('saas_theme') === 'dark')
@@ -178,8 +226,30 @@ const universities = ref([]), schedules = ref([]), laws = ref([]), allLaws = ref
 const paymentDialog = ref(false), selectedPlan = ref(null), paymentChannel = ref('mock'), paymentOrder = ref(null)
 const users = ref([]), codes = ref([]), stats = ref({}), newCode = ref({plan_code:'vip_month', duration_days:30, count:1})
 const assistant = ref({context:'', question:'', answer:''})
+const studentProfileRef = ref(null)
+/** Judge writeback uses shared activeStudentId (stable student_id). */
+const profileStudentId = activeStudentId
 const form = ref({name:'', birth_date:'', current_nationality:'', has_chinese_nationality:false, has_foreign_nationality:true, foreign_nationality_acquired_date:'', settled_abroad:true, permanent_residence_country:'', overseas_residence_months_last_2y:0, overseas_residence_months_last_4y:24, annual_months_overseas:9, has_mainland_household:false, has_denationalization_certificate:false, denationalization_certificate_info:'', parent_chinese_citizen:false, parent_settled_abroad_at_birth:false, born_abroad:false, intended_field:'综合', score:null, passport_info:'', household_info:'', complex_situation:''})
 const planText = computed(() => user.value?.features?.paid ? text.value.paidPlanText : text.value.freePlanText)
+
+async function refreshStudentSwitcher() {
+  try {
+    const r = await api.students()
+    syncStudentsAndActive(r.students || [])
+  } catch {
+    /* not logged in / no students yet */
+  }
+}
+function onHomeSwitchStudent(id) {
+  const ok = setActiveStudentId(id)
+  if (!ok) {
+    ElMessage.warning('无法切换到该学生')
+    return
+  }
+  if (tab.value === 'studentProfile' && studentProfileRef.value?.openStudent) {
+    studentProfileRef.value.openStudent(id)
+  }
+}
 
 const MEMBER_PLAN_ORDER = ['free', 'vip_month', 'vip_year', 'vip_three_year', 'lifetime']
 function planSortKey(code) {
@@ -196,10 +266,63 @@ function formatPlanDuration(p) {
   return `${d} 天`
 }
 
-async function boot(){ try{ user.value = await api.me(); await loadTab('internationalDashboard') }catch{} }
-async function doLogin(){ loading.value=true; try{ const r=await api.login(login.value); setToken(r.token); user.value=r.user; await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-async function doRegister(){ loading.value=true; try{ const r=await api.register(register.value); setToken(r.token); user.value=r.user; await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-function logout(){ localStorage.removeItem('saas_token'); location.reload() }
+async function boot(){
+  if (!syncTokenFromStorage()) return
+  try {
+    user.value = await api.me()
+    await refreshStudentSwitcher()
+    await loadTab('internationalDashboard')
+  } catch {
+    clearToken()
+    user.value = null
+  }
+}
+async function doLogin() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const email = (login.value.email || '').trim()
+    const password = login.value.password || ''
+    if (!email || !password) {
+      ElMessage.warning('请输入邮箱和密码')
+      return
+    }
+    const r = await api.login({ email, password })
+    if (!r?.token) throw new Error('登录响应缺少 token')
+    setToken(r.token)
+    user.value = r.user
+    try {
+      await refreshStudentSwitcher()
+    } catch { /* students optional at login */ }
+    await loadTab('internationalDashboard')
+  } catch (e) {
+    ElMessage.error(e.message || '登录失败')
+  } finally {
+    loading.value = false
+  }
+}
+async function doRegister() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const r = await api.register(register.value)
+    if (!r?.token) throw new Error('注册响应缺少 token')
+    setToken(r.token)
+    user.value = r.user
+    try { await refreshStudentSwitcher() } catch { /* optional */ }
+    await loadTab('internationalDashboard')
+  } catch (e) {
+    ElMessage.error(e.message || '注册失败')
+  } finally {
+    loading.value = false
+  }
+}
+function logout() {
+  clearActiveStudent()
+  clearToken()
+  user.value = null
+  location.reload()
+}
 function startJudge(type){ judgeType.value=type; tab.value='judge'; target.value=type; applyJudgeDefaults(type) }
 function applyJudgeDefaults(type){
   if(type==='huaqiao') Object.assign(form.value, {has_chinese_nationality:true, has_foreign_nationality:false, settled_abroad:true, has_mainland_household:false, overseas_residence_months_last_2y:18, overseas_residence_months_last_4y:0, annual_months_overseas:0, has_denationalization_certificate:false})
@@ -207,8 +330,23 @@ function applyJudgeDefaults(type){
 }
 watch(judgeType, applyJudgeDefaults)
 async function refreshMe(){ user.value = await api.me() }
-async function loadTab(name){ tab.value=name; if(name==='laws') await loadLaws(); if(name==='universities') await loadUniversities(); if(name==='schedules') await loadSchedules(); if(name==='history') await loadRecords(); if(name==='member'){ plans.value=await api.plans(); orders.value=await api.orders() } if(name==='admin'){ stats.value=await api.adminStats(); users.value=await api.adminUsers(); codes.value=await api.adminCodes(); plans.value=await api.adminPlans() } }
-async function submitJudge(){ try{ result.value = judgeType.value==='international' ? await api.judgeInternational(form.value) : await api.judgeHuaqiao(form.value); await refreshMe(); ElMessage.success('判定完成') }catch(e){ ElMessage.error(e.message) } }
+async function loadTab(name){ tab.value=name; if(name==='laws') await loadLaws(); if(name==='universities') await loadUniversities(); if(name==='schedules') await loadSchedules(); if(name==='history') await loadRecords(); if(name==='member'){ plans.value=await api.plans(); orders.value=await api.orders() } if(name==='admin'){ stats.value=await api.adminStats(); users.value=await api.adminUsers(); codes.value=await api.adminCodes(); plans.value=await api.adminPlans() } if(name==='studentProfile') await refreshStudentSwitcher() }
+function onGotoJudgeFromProfile(payload){
+  setActiveStudentId(payload.studentId, { allowUnknown: true })
+  judgeType.value = payload.kind
+  Object.assign(form.value, payload.prefills || {})
+  tab.value = 'judge'
+  target.value = payload.kind
+}
+async function confirmJudgeWriteback(){
+  if(!profileStudentId.value || !result.value){ ElMessage.warning('请先从学生档案进入判定'); return }
+  try{
+    await api.studentWriteback(profileStudentId.value, { kind: judgeType.value, result: result.value.result, conclusion: result.value.conclusion || result.value.explanation, record_id: result.value.record_id, policy_version: 'R4.2', confirm: true })
+    ElMessage.success('判定结果已确认写入学生档案')
+    tab.value = 'studentProfile'
+  }catch(e){ ElMessage.error(e.message) }
+}
+async function submitJudge(){ try{ result.value = judgeType.value==='international' ? await api.judgeInternational(form.value) : await api.judgeHuaqiao(form.value); await refreshMe(); if(profileStudentId.value && result.value){ try{ await api.studentWriteback(profileStudentId.value, { kind: judgeType.value, result: result.value.result, conclusion: result.value.conclusion || result.value.explanation, record_id: result.value.record_id, policy_version: 'R4.2', confirm: false }); ElMessage.success('判定完成，可确认写入学生档案') }catch{ ElMessage.success('判定完成') } } else { ElMessage.success('判定完成') } }catch(e){ ElMessage.error(e.message) } }
 async function loadLaws(){ if(!allLaws.value.length) allLaws.value = await api.laws(''); policies.value = await api.policies(lawKeyword.value); laws.value = await api.laws(lawKeyword.value) }
 async function loadUniversities(){ await refreshMe(); universities.value = await api.universities(target.value, field.value, {province: provinceFilter.value, tag: tagFilter.value, feature: featureFilter.value}) }
 async function loadSchedules(){ schedules.value = await api.schedules(target.value, month.value || '', {province: scheduleProvinceFilter.value, tag: scheduleTagFilter.value, feature: scheduleFeatureFilter.value}) }
@@ -259,8 +397,8 @@ async function exportReport(recordId){ if(!user.value.features.report_export){ s
 onMounted(() => { syncHtmlDark(); boot() })
 
 const ResultPanel = defineComponent({
-  props:{result:Object, paid:Boolean},
-  emits:['export','unlock','openContact'],
+  props:{result:Object, paid:Boolean, canWriteback:Boolean},
+  emits:['export','unlock','openContact','writeback'],
   setup(props,{emit}){
     const planningBlock = () => {
       const p = props.result.planning
@@ -281,7 +419,7 @@ const ResultPanel = defineComponent({
       planningBlock(),
       h('h3','国籍法依据'), h('div',{class:'law-mini'}, props.result.basis_articles.map(a=>h('article',[h('b',`第${a.number}条：${a.title}`), h('p',a.text), h('small',a.explanation)]))),
       h('h3','推荐大学'), h('div',{class:'school-grid'}, props.result.recommendations.map(u=>h('article',{class:'mini-card'},[h('b',`#${u.ranking} ${u.name}`), h('p',u.tags), h('p',u.fields), h('p',u.advantage_majors), h('small',u.match_reason)]))),
-      h('div',{class:'report-actions'},[h('button',{class:'plain-btn',onClick:()=>emit('export',props.result.record_id||props.result.id)},'导出判定报告'), !props.paid?h('button',{class:'warn-btn',onClick:()=>emit('unlock')},'查看付费解锁权益'):null])
+      h('div',{class:'report-actions'},[h('button',{class:'plain-btn',onClick:()=>emit('export',props.result.record_id||props.result.id)},'导出判定报告'), props.canWriteback?h('button',{class:'plain-btn',onClick:()=>emit('writeback')},'确认写入学生档案'):null, !props.paid?h('button',{class:'warn-btn',onClick:()=>emit('unlock')},'查看付费解锁权益'):null])
     ])
   }
 })

@@ -5,4 +5,5 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import App from './App.vue'
 import './styles.css'
 import './theme-overrides.css'
+import './student-profile.css'
 createApp(App).use(ElementPlus).mount('#app')

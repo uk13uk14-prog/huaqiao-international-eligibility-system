@@ -11,11 +11,15 @@ from app.database import Base
 from app.models import *  # noqa: F401, F403
 
 config = context.config
-if config.get_main_option("sqlalchemy.url", "").startswith("postgresql"):
-    pass
-else:
-    database_url = os.getenv("DATABASE_URL", "postgresql+psycopg://huaqiao:huaqiao_dev@localhost:5432/huaqiao_saas")
+# Prefer explicit DATABASE_URL so CI/freeze can run sqlite upgrade tests.
+database_url = os.getenv("DATABASE_URL")
+if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
+elif not config.get_main_option("sqlalchemy.url", "").startswith("postgresql"):
+    config.set_main_option(
+        "sqlalchemy.url",
+        "postgresql+psycopg://huaqiao:huaqiao_dev@localhost:5432/huaqiao_saas",
+    )
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
