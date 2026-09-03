@@ -105,6 +105,30 @@ await withPage(async (page) => {
   assert.equal(await page.evaluate(() => document.body.innerText.includes('退出')), true)
 })
 
+console.log('5c) Tab + Enter login')
+await withPage(async (page) => {
+  const api = []
+  page.on('request', (r) => {
+    if (r.url().includes('/api/auth/login')) api.push(r.method())
+  })
+  page.on('response', (r) => {
+    if (r.url().includes('/api/auth/login')) api.push(r.status())
+  })
+  await clearSession(page)
+  await page.click('[data-testid="login-email"]')
+  await page.keyboard.type(EMAIL)
+  await page.keyboard.press('Tab')
+  await sleep(150)
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))
+  assert.equal(focused, 'login-password', 'Tab did not focus password')
+  await page.keyboard.type(PASSWORD)
+  await page.keyboard.press('Enter')
+  await sleep(2500)
+  assert.ok(api.includes('POST'), 'Tab+Enter did not POST')
+  assert.ok(api.includes(200), 'Tab+Enter login not 200')
+  assert.equal(await page.evaluate(() => document.body.innerText.includes('退出')), true)
+})
+
 console.log('9) refresh keeps login')
 await withPage(async (page) => {
   await clearSession(page)
