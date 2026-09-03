@@ -339,7 +339,7 @@ def get_timeline(student_id: int, user: User = Depends(get_current_user), db: Se
 def regenerate_timeline(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     row = _owned(db, user, student_id)
     profile = _decrypt_row(row)
-    regenerate_student_timeline(db, row.id, user.id, user.tenant_id, profile)
+    regen = regenerate_student_timeline(db, row.id, user.id, user.tenant_id, profile)
     items = _timeline_items_for(db, row.id, user.id)
     return {
         "student_id": row.id,
@@ -347,6 +347,8 @@ def regenerate_timeline(student_id: int, user: User = Depends(get_current_user),
         "groups": group_timeline(items),
         "summary": timeline_summary(items),
         "portrait": portrait_service.generate(profile, timeline_summary(items)),
+        "unresolved_targets": regen.get("unresolved_targets") or [],
+        "matched_source_count": regen.get("matched_source_count") or 0,
     }
 
 

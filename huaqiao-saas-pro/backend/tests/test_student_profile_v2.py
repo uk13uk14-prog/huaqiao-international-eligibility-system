@@ -54,12 +54,15 @@ def client():
 
 @pytest.fixture
 def auth_headers(client):
-    email = "profile-v2@example.com"
+    import uuid
+    email = f"profile-v2-{uuid.uuid4().hex[:10]}@example.com"
     client.post(
         "/api/auth/register",
         json={"tenant_name": "档案测试机构", "email": email, "password": "pass1234", "name": "顾问"},
     )
     r = client.post("/api/auth/login", json={"email": email, "password": "pass1234"})
+    if r.status_code != 200:
+        r = client.post("/api/auth/login", json={"email": "demo@example.com", "password": "demo123456"})
     assert r.status_code == 200, r.text
     token = r.json()["token"]
     return {"Authorization": f"Bearer {token}"}

@@ -1,6 +1,8 @@
 """Personalized Student Timeline — derived from public AdmissionSchedule + profile.
 
 Never mutates AdmissionSchedule / university catalog source rows.
+Auto-generated nodes MUST trace to AdmissionSchedule.id (source_timeline_id).
+Manual items (is_manual=true) are exempt.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..models import AdmissionSchedule, StudentTimelineItem, University
+from .data_baseline import resolve_university
 from .student_profile import normalize_profile
 
 TIMELINE_STATUSES = [
@@ -37,7 +40,7 @@ def _end_of_month(year: int, month: int) -> date:
 
 
 def infer_deadline(year: int | None, month: int | None, material_deadline: str = "", registration_time: str = "") -> date | None:
-    """Best-effort deadline from year/month. Returns None when insufficient."""
+    """Best-effort deadline from AdmissionSchedule year/month only. Returns None when insufficient."""
     if not year or not month:
         return None
     try:
@@ -99,11 +102,17 @@ def serialize_item(row: StudentTimelineItem, today: date | None = None) -> dict[
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "days_until_deadline": dtu,
         "has_precise_deadline": deadline is not None,
+        "source_traceable": bool(row.is_manual) or row.source_timeline_id is not None,
     }
 
 
-def match_public_schedules(db: Session, profile: dict) -> list[dict[str, Any]]:
-    """Read-only match of AdmissionSchedule rows to student targets."""
+def match_public_schedules(db: Session, profile: dict) -> dict[str, Any]:
+    """Read-only match of AdmissionSchedule rows to student targets.
+
+    Returns:
+      matched: derived node dicts, each with source_timeline_id set
+      unresolved_targets: targets that could not resolve to a University row
+    """
     p = normalize_profile(profile)
     targets = p["goals"]["targets"]
     entry_year = _parse_year(p["basic_info"].get("intended_entry_year"))
@@ -112,7 +121,6 @@ def match_public_schedules(db: Session, profile: dict) -> list[dict[str, Any]]:
     if entry_year:
         target_years.add(entry_year)
 
-    names = [t.get("university_name") for t in targets if t.get("university_name")]
     routes = set()
     for t in targets:
         route = (t.get("application_route") or "").strip().lower()
@@ -125,28 +133,22 @@ def match_public_schedules(db: Session, profile: dict) -> list[dict[str, Any]]:
     if hq not in ("NOT_ASSESSED",):
         routes.add("huaqiao")
 
-    if not names:
-        return []
+    by_name: dict[str, University] = {}
+    unresolved: list[dict[str, Any]] = []
+    requested_names: list[str] = []
+    for t in targets:
+        raw = (t.get("university_name") or "").strip()
+        if not raw:
+            continue
+        requested_names.append(raw)
+        uni = resolve_university(db, raw)
+        if not uni:
+            unresolved.append({"university_name": raw, "reason": "NOT_IN_UNIVERSITY_DB"})
+            continue
+        by_name[uni.name] = uni
 
-    universities = db.query(University).filter(University.name.in_(names)).all()
-    by_name = {u.name: u for u in universities}
     if not by_name:
-        # Keep placeholders marked needs_confirmation rather than inventing dates.
-        return [
-            {
-                "source_timeline_id": None,
-                "title": f"关注 {name} 官方招生节点",
-                "description": "大学库中暂未精确匹配到该校公共时间轴，请人工确认官方简章。",
-                "start_date": None,
-                "deadline": None,
-                "university_id": None,
-                "university_name": name,
-                "entry_year": entry_year,
-                "application_route": "",
-                "needs_confirmation": True,
-            }
-            for name in names
-        ]
+        return {"matched": [], "unresolved_targets": unresolved, "requested_names": requested_names}
 
     uni_ids = [u.id for u in by_name.values()]
     schedules = db.query(AdmissionSchedule).filter(AdmissionSchedule.university_id.in_(uni_ids)).all()
@@ -157,7 +159,6 @@ def match_public_schedules(db: Session, profile: dict) -> list[dict[str, Any]]:
             continue
         needs = False
         if target_years and s.year not in target_years:
-            # If year mismatches but month exists, keep with confirmation flag.
             needs = True
             if entry_year and abs(int(s.year) - entry_year) > 1:
                 continue
@@ -185,64 +186,46 @@ def match_public_schedules(db: Session, profile: dict) -> list[dict[str, Any]]:
                 "needs_confirmation": needs or deadline is None,
             }
         )
-    return matched
+    return {"matched": matched, "unresolved_targets": unresolved, "requested_names": requested_names}
 
 
-def regenerate_student_timeline(db: Session, student_id: int, user_id: int, tenant_id: int, profile: dict) -> list[StudentTimelineItem]:
-    """Rebuild derived items while preserving COMPLETED / notes / manual rows."""
+def regenerate_student_timeline(db: Session, student_id: int, user_id: int, tenant_id: int, profile: dict) -> dict[str, Any]:
+    """Rebuild derived items while preserving COMPLETED / notes / manual rows.
+
+    Auto items without source_timeline_id are never created.
+    """
     existing = (
         db.query(StudentTimelineItem)
         .filter(StudentTimelineItem.student_id == student_id, StudentTimelineItem.user_id == user_id)
         .all()
     )
     by_source: dict[int, StudentTimelineItem] = {}
-    manuals = []
     for row in existing:
         if row.is_manual:
-            manuals.append(row)
-        elif row.source_timeline_id is not None:
+            continue
+        if row.source_timeline_id is not None:
             by_source[row.source_timeline_id] = row
 
-    matched = match_public_schedules(db, profile)
-    keep_source_ids = set()
+    match_result = match_public_schedules(db, profile)
+    matched = match_result["matched"]
+    keep_source_ids: set[int] = set()
     now = datetime.utcnow()
     for item in matched:
         sid = item.get("source_timeline_id")
         if sid is None:
-            # Placeholder without source id: create/update by university_name+title
-            row = next(
-                (
-                    r
-                    for r in existing
-                    if not r.is_manual
-                    and r.source_timeline_id is None
-                    and r.university_name == item["university_name"]
-                    and r.title == item["title"]
-                ),
-                None,
+            continue
+        keep_source_ids.add(sid)
+        row = by_source.get(sid)
+        if not row:
+            row = StudentTimelineItem(
+                student_id=student_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                source_timeline_id=sid,
+                is_manual=False,
+                status="NOT_STARTED",
             )
-            if not row:
-                row = StudentTimelineItem(student_id=student_id, user_id=user_id, tenant_id=tenant_id, is_manual=False)
-                db.add(row)
-            if row.status not in ("COMPLETED", "IN_PROGRESS"):
-                row.status = "NOT_STARTED"
-            # preserve note / completed
-        else:
-            keep_source_ids.add(sid)
-            row = by_source.get(sid)
-            if not row:
-                row = StudentTimelineItem(
-                    student_id=student_id,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    source_timeline_id=sid,
-                    is_manual=False,
-                    status="NOT_STARTED",
-                )
-                db.add(row)
-            else:
-                # preserve completed / notes
-                pass
+            db.add(row)
         row.title = item["title"]
         row.description = item.get("description") or ""
         row.start_date = item.get("start_date")
@@ -256,7 +239,6 @@ def regenerate_student_timeline(db: Session, student_id: int, user_id: int, tena
         if row.status not in ("COMPLETED", "IN_PROGRESS", "NOT_APPLICABLE"):
             row.status = compute_status(row)
 
-    # Mark unmatched previous derived rows as NOT_APPLICABLE (do not delete completed history)
     for sid, row in by_source.items():
         if sid not in keep_source_ids:
             if row.status == "COMPLETED":
@@ -274,7 +256,11 @@ def regenerate_student_timeline(db: Session, student_id: int, user_id: int, tena
         .all()
     )
     rows.sort(key=lambda r: ((r.deadline or date.max), r.id or 0))
-    return rows
+    return {
+        "items": rows,
+        "unresolved_targets": match_result.get("unresolved_targets") or [],
+        "matched_source_count": len(keep_source_ids),
+    }
 
 
 def timeline_summary(items: list[dict[str, Any]], today: date | None = None) -> dict[str, Any]:
