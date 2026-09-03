@@ -22,6 +22,7 @@
         <van-grid :column-num="2" :gutter="10" class="home-grid">
           <van-grid-item icon="award-o" text="国际生判定" @click="openJudge('international')" />
           <van-grid-item icon="passed" text="华侨生判定" @click="openJudge('huaqiao')" />
+          <van-grid-item icon="contact" text="学生档案" @click="openPage('profile')" />
           <van-grid-item icon="bookmark-o" text="国籍法条款" @click="openLawsNationality" />
           <van-grid-item icon="description" text="教外函政策" @click="openLawsPolicy" />
           <van-grid-item icon="wap-home-o" text="大学库" @click="openPage('universities')" />
@@ -154,9 +155,14 @@
             <van-button round block type="default" icon="service-o" @click="showConsult = true">一对一规划咨询</van-button>
             <van-button round block icon="down" :loading="savingImage" @click="saveResultImage">保存结果图</van-button>
             <van-button round block type="primary" icon="replay" @click="openJudge(result.eligibility_type)">重新判定</van-button>
+            <van-button v-if="profileStudentId && getSaasToken()" round block type="success" @click="confirmProfileWriteback">确认写入学生档案</van-button>
           </div>
         </template>
         <van-empty v-else description="暂无判定结果" />
+      </section>
+
+      <section v-if="tab === 'profile'" class="list-screen">
+        <StudentProfile @goto-judge="onGotoJudgeFromProfile" />
       </section>
 
       <section v-if="tab === 'laws'" class="list-screen laws-screen">
@@ -357,6 +363,7 @@ import { showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
 import { api } from './api'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
+import StudentProfile from './StudentProfile.vue'
 
 const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
 
@@ -421,6 +428,7 @@ const expertDetailShow = ref(false)
 const expertDetail = ref(null)
 const expertDetailLoading = ref(false)
 const reminderList = ref([])
+const profileStudentId = ref(localStorage.getItem('smp_student_id') ? Number(localStorage.getItem('smp_student_id')) : null)
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
 const fieldColumns = fieldValues.map(text => ({ text, value: text }))
@@ -433,7 +441,7 @@ const monthOptions = [{ text: '全部月份', value: '' }, ...Array.from({ lengt
 const pendingLawScroll = ref(null)
 
 const form = ref(defaultForm('international'))
-const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录' }[tab.value]))
+const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案' }[tab.value]))
 const judgeTypeLabel = computed(() => judgeType.value === 'huaqiao' ? '华侨生' : '国际生')
 
 watch(targetFilter, (v) => { eligibilityContext.value = v })
@@ -758,13 +766,19 @@ function openLawsPolicy() {
   openPage('laws')
 }
 
-function openJudge(type) {
+function openJudge(type, prefills) {
   eligibilityContext.value = type
   judgeType.value = type
   judgeStep.value = 0
   denationalizationInfo.value = ''
-  form.value = defaultForm(type)
+  form.value = { ...defaultForm(type), ...(prefills || {}) }
   pushTab('judge')
+}
+
+function onGotoJudgeFromProfile(payload) {
+  profileStudentId.value = payload.studentId
+  localStorage.setItem('smp_student_id', String(payload.studentId || ''))
+  openJudge(payload.kind, payload.prefills)
 }
 
 function onTargetFilterChange() {
@@ -822,6 +836,18 @@ async function submitJudge() {
     }
     const payload = { ...form.value, complex_situation: complex }
     result.value = judgeType.value === 'huaqiao' ? await api.judgeHuaqiao(payload) : await api.judgeInternational(payload)
+    if (profileStudentId.value && getSaasToken()) {
+      try {
+        await saasApi.studentWriteback(profileStudentId.value, {
+          kind: judgeType.value,
+          result: result.value.result,
+          conclusion: result.value.conclusion || result.value.explanation,
+          record_id: result.value.record_id,
+          policy_version: 'R4.2',
+          confirm: false,
+        })
+      } catch { /* 档案写回失败不影响判定展示 */ }
+    }
     pushTab('result')
     await loadRecords()
     showSuccessToast('判定完成')
@@ -830,6 +856,27 @@ async function submitJudge() {
   } finally {
     toast.close()
     loading.value = false
+  }
+}
+
+async function confirmProfileWriteback() {
+  if (!profileStudentId.value || !result.value) {
+    showFailToast('没有可写入的档案')
+    return
+  }
+  try {
+    await saasApi.studentWriteback(profileStudentId.value, {
+      kind: result.value.eligibility_type || judgeType.value,
+      result: result.value.result,
+      conclusion: result.value.conclusion || result.value.explanation,
+      record_id: result.value.record_id,
+      policy_version: 'R4.2',
+      confirm: true,
+    })
+    showSuccessToast('已确认写入学生档案')
+    pushTab('profile')
+  } catch (error) {
+    showFailToast(error.message || '写入失败')
   }
 }
 

@@ -64,6 +64,8 @@ settings = get_settings()
 audit_logger = AuditLogger()
 
 app = FastAPI(title=settings.app_name, version="1.0.0", description="国际生资格智评系统 SaaS Pro API")
+from .student_api import router as student_router
+app.include_router(student_router)
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -548,6 +550,13 @@ def vault_put(payload: CustomerVaultUpsert, user: User = Depends(get_current_use
         row.cipher_blob = blob
     db.commit()
     db.refresh(row)
+    # Keep Master Profile compatible: if no student exists yet, migrate this vault
+    # document. Existing student arrays are never replaced by a flat vault PUT.
+    try:
+        from .student_api import migrate_vault_if_needed
+        migrate_vault_if_needed(db, user)
+    except Exception:
+        pass
     return {"ok": True, "updated_at": row.updated_at}
 
 

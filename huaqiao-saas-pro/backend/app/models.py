@@ -158,6 +158,20 @@ class CustomerVault(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class StudentMasterProfile(Base):
+    """Student Master Profile v2 — encrypted JSON document per student."""
+    __tablename__ = "student_master_profiles"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
+    display_name = Column(String(160), default="")
+    cipher_blob = Column(Text, default="")
+    schema_version = Column(Integer, default=2)
+    source = Column(String(40), default="created")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ExpertConsultation(Base):
     """一对一专家咨询：付费提交 → 系统自动生成初稿 → 人工审核下发。"""
     __tablename__ = "expert_consultations"

@@ -14,5 +14,12 @@ export const api = {
   judgeInternational: data => request('/api/eligibility/international', { method: 'POST', body: JSON.stringify(data) }), judgeHuaqiao: data => request('/api/eligibility/huaqiao', { method: 'POST', body: JSON.stringify(data) }),
   records: () => request('/api/records'), recordDetail: id => request(`/api/records/${id}`), exportReport: id => request(`/api/records/${id}/report`, { headers: { Accept: 'text/plain' } }), planning: kind => request(`/api/planning/${kind}`), universities: (target='international', field='', filters = {}) => { const params = new URLSearchParams({ target, field, ...filters }); return request(`/api/universities?${params.toString()}`) }, schedules: (target='international', month='', filters = {}) => { const params = new URLSearchParams({ target, ...(month ? { month } : {}), ...filters }); return request(`/api/schedules?${params.toString()}`) }, recommendations: (target='international', field='综合', score='') => request(`/api/recommendations?target=${target}&field=${encodeURIComponent(field)}${score ? `&score=${score}` : ''}`),
   ask: data => request('/api/assistant/ask', { method: 'POST', body: JSON.stringify(data) }),
+  students: () => request('/api/students'),
+  createStudent: data => request('/api/students', { method: 'POST', body: JSON.stringify(data || {}) }),
+  student: id => request(`/api/students/${id}`),
+  patchStudentSection: (id, section, data) => request(`/api/students/${id}/sections/${section}`, { method: 'PATCH', body: JSON.stringify({ data }) }),
+  completeStudentWizard: id => request(`/api/students/${id}/complete-wizard`, { method: 'POST', body: '{}' }),
+  studentWriteback: (id, data) => request(`/api/students/${id}/eligibility/writeback`, { method: 'POST', body: JSON.stringify(data) }),
+  studentTimeline: id => request(`/api/students/${id}/timeline-matches`),
   adminUsers: () => request('/api/admin/users'), adminStats: () => request('/api/admin/stats'), adminPlans: () => request('/api/admin/plans'), updatePlan: (code, data) => request(`/api/admin/plans/${code}`, { method: 'PATCH', body: JSON.stringify(data) }), adminCodes: () => request('/api/admin/recharge-codes'), createCodes: data => request('/api/admin/recharge-codes', { method: 'POST', body: JSON.stringify(data) })
 }

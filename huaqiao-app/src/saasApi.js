@@ -65,6 +65,16 @@ export const saasApi = {
 
   vaultPut: (profile) => saasRequest('/api/vault/profile', { method: 'PUT', body: JSON.stringify({ profile }) }),
 
+  students: () => saasRequest('/api/students'),
+  createStudent: (data) => saasRequest('/api/students', { method: 'POST', body: JSON.stringify(data || {}) }),
+  student: (id) => saasRequest(`/api/students/${id}`),
+  patchStudentSection: (id, section, data) =>
+    saasRequest(`/api/students/${id}/sections/${section}`, { method: 'PATCH', body: JSON.stringify({ data }) }),
+  completeStudentWizard: (id) => saasRequest(`/api/students/${id}/complete-wizard`, { method: 'POST', body: '{}' }),
+  studentWriteback: (id, data) =>
+    saasRequest(`/api/students/${id}/eligibility/writeback`, { method: 'POST', body: JSON.stringify(data) }),
+  studentTimeline: (id) => saasRequest(`/api/students/${id}/timeline-matches`),
+
   expertCreate: (data) => saasRequest('/api/expert/consultations', { method: 'POST', body: JSON.stringify(data) }),
 
   expertList: () => saasRequest('/api/expert/consultations'),

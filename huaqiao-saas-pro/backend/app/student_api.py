@@ -1,0 +1,302 @@
+"""Student Master Profile HTTP API. Eligibility engines are not modified."""
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from .database import get_db
+from .models import AdmissionSchedule, CustomerVault, StudentMasterProfile, University, User
+from .schemas import StudentCreateIn, StudentEligibilityWriteback, StudentSectionPatch
+from .services.security import get_current_user
+from .services.student_profile import (
+    SECTIONS,
+    apply_eligibility_result,
+    completeness,
+    display_name_of,
+    empty_profile,
+    judge_prefills,
+    merge_section,
+    migrate_legacy_vault,
+    normalize_profile,
+    profile_summary,
+    project_legacy_vault,
+)
+from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
+
+router = APIRouter(prefix="/api/students", tags=["students"])
+
+
+def _decrypt_row(row: StudentMasterProfile) -> dict:
+    if not row.cipher_blob:
+        return empty_profile()
+    try:
+        return normalize_profile(decrypt_profile_json(row.cipher_blob))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="学生档案解密失败，请联系管理员") from exc
+
+
+def _save_row(db: Session, row: StudentMasterProfile, profile: dict) -> StudentMasterProfile:
+    doc = normalize_profile(profile)
+    row.cipher_blob = encrypt_profile_json(doc)
+    row.display_name = display_name_of(doc)
+    row.schema_version = 2
+    row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    _sync_legacy_vault(db, row.user_id, doc)
+    return row
+
+
+def _sync_legacy_vault(db: Session, user_id: int, profile: dict) -> None:
+    """Project v2 fields back to the flat vault blob without deleting unknown keys."""
+    vault = db.query(CustomerVault).filter(CustomerVault.user_id == user_id).first()
+    if not vault:
+        return
+    try:
+        current = decrypt_profile_json(vault.cipher_blob) if vault.cipher_blob else {}
+    except Exception:
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    projected = project_legacy_vault(profile)
+    merged = {**current, **projected}
+    vault.cipher_blob = encrypt_profile_json(merged)
+    vault.schema_version = max(int(vault.schema_version or 1), 2)
+    db.add(vault)
+    db.commit()
+
+
+def _payload(row: StudentMasterProfile, profile: dict | None = None) -> dict:
+    doc = profile if profile is not None else _decrypt_row(row)
+    return {
+        "id": row.id,
+        "display_name": row.display_name or display_name_of(doc),
+        "schema_version": row.schema_version,
+        "source": row.source,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "profile": doc,
+        "summary": profile_summary(doc),
+        "completeness": completeness(doc),
+        "legacy_projection": project_legacy_vault(doc),
+        "judge_prefills": judge_prefills(doc),
+    }
+
+
+def _owned(db: Session, user: User, student_id: int) -> StudentMasterProfile:
+    row = (
+        db.query(StudentMasterProfile)
+        .filter(
+            StudentMasterProfile.id == student_id,
+            StudentMasterProfile.user_id == user.id,
+            StudentMasterProfile.tenant_id == user.tenant_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="学生档案不存在")
+    return row
+
+
+def migrate_vault_if_needed(db: Session, user: User) -> None:
+    existing = db.query(StudentMasterProfile).filter(StudentMasterProfile.user_id == user.id).count()
+    if existing:
+        return
+    vault = db.query(CustomerVault).filter(CustomerVault.user_id == user.id).first()
+    if not vault or not vault.cipher_blob:
+        return
+    try:
+        old = decrypt_profile_json(vault.cipher_blob)
+    except Exception:
+        return
+    if not old:
+        return
+    profile = migrate_legacy_vault(old)
+    row = StudentMasterProfile(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        display_name=display_name_of(profile),
+        cipher_blob=encrypt_profile_json(profile),
+        schema_version=2,
+        source="legacy_vault",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    vault.schema_version = max(int(vault.schema_version or 1), 2)
+    db.commit()
+
+
+@router.get("")
+def list_students(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    migrate_vault_if_needed(db, user)
+    rows = (
+        db.query(StudentMasterProfile)
+        .filter(StudentMasterProfile.user_id == user.id)
+        .order_by(StudentMasterProfile.updated_at.desc())
+        .all()
+    )
+    items = []
+    for row in rows:
+        doc = _decrypt_row(row)
+        items.append(
+            {
+                "id": row.id,
+                "display_name": row.display_name or display_name_of(doc),
+                "source": row.source,
+                "updated_at": row.updated_at,
+                "summary": profile_summary(doc),
+                "completeness": completeness(doc),
+            }
+        )
+    return {"students": items}
+
+
+@router.post("")
+def create_student(payload: StudentCreateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    incoming = payload.profile or {}
+    if incoming.get("basic_info") or incoming.get("schema_version") == 2:
+        profile = normalize_profile(incoming)
+    else:
+        profile = migrate_legacy_vault(incoming) if incoming else empty_profile()
+    if payload.wizard:
+        profile["wizard_completed"] = False
+    row = StudentMasterProfile(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        display_name=display_name_of(profile),
+        cipher_blob=encrypt_profile_json(profile),
+        schema_version=2,
+        source="created",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _payload(row, profile)
+
+
+@router.get("/meta")
+def student_meta():
+    from .services.student_profile import (
+        CURRICULUMS,
+        GRADE_TYPES,
+        LANGUAGE_EXAMS,
+        OTHER_EXAM_TYPES,
+        PRIORITY_LEVELS,
+        SCHOOL_TYPES,
+        ELIGIBILITY_STATUSES,
+        SECTION_NOTES,
+    )
+
+    return {
+        "school_types": SCHOOL_TYPES,
+        "curriculums": CURRICULUMS,
+        "grade_types": GRADE_TYPES,
+        "language_exams": LANGUAGE_EXAMS,
+        "other_exam_types": OTHER_EXAM_TYPES,
+        "priority_levels": PRIORITY_LEVELS,
+        "eligibility_statuses": ELIGIBILITY_STATUSES,
+        "section_notes": SECTION_NOTES,
+        "sections": SECTIONS,
+    }
+
+
+@router.get("/{student_id}")
+def get_student(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned(db, user, student_id)
+    return _payload(row)
+
+
+@router.patch("/{student_id}/sections/{section}")
+def patch_section(
+    student_id: int,
+    section: str,
+    payload: StudentSectionPatch,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if section not in SECTIONS:
+        raise HTTPException(status_code=400, detail="未知档案分节")
+    row = _owned(db, user, student_id)
+    profile = merge_section(_decrypt_row(row), section, payload.data or {})
+    if section == "basic_info" and (profile["basic_info"].get("chinese_name") or profile["basic_info"].get("english_name")):
+        profile["wizard_completed"] = profile.get("wizard_completed") or False
+    _save_row(db, row, profile)
+    return _payload(row, profile)
+
+
+@router.post("/{student_id}/complete-wizard")
+def complete_wizard(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _owned(db, user, student_id)
+    profile = _decrypt_row(row)
+    profile["wizard_completed"] = True
+    _save_row(db, row, profile)
+    return _payload(row, profile)
+
+
+@router.post("/{student_id}/eligibility/writeback")
+def eligibility_writeback(
+    student_id: int,
+    payload: StudentEligibilityWriteback,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if payload.kind not in ("international", "huaqiao"):
+        raise HTTPException(status_code=400, detail="判定类型无效")
+    row = _owned(db, user, student_id)
+    profile = apply_eligibility_result(
+        _decrypt_row(row),
+        payload.kind,
+        {
+            "result": payload.result,
+            "conclusion": payload.conclusion or payload.explanation,
+            "explanation": payload.explanation,
+            "record_id": payload.record_id,
+            "policy_version": payload.policy_version,
+        },
+        confirm=payload.confirm,
+    )
+    _save_row(db, row, profile)
+    return _payload(row, profile)
+
+
+@router.get("/{student_id}/timeline-matches")
+def timeline_matches(
+    student_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Read-only match against existing admission schedules. Does not mutate timeline rows."""
+    row = _owned(db, user, student_id)
+    profile = _decrypt_row(row)
+    names = [t.get("university_name") for t in profile["goals"]["targets"] if t.get("university_name")]
+    years = {str(t.get("entry_year")) for t in profile["goals"]["targets"] if t.get("entry_year")}
+    if not names:
+        return {"matches": []}
+    universities = db.query(University).filter(University.name.in_(names)).all()
+    by_id = {u.id: u for u in universities}
+    if not by_id:
+        return {"matches": []}
+    q = db.query(AdmissionSchedule).filter(AdmissionSchedule.university_id.in_(list(by_id.keys())))
+    items = []
+    for s in q.order_by(AdmissionSchedule.year, AdmissionSchedule.month).all():
+        uni = by_id.get(s.university_id)
+        if years and str(s.year) not in years and str(s.year) not in {y[:4] for y in years}:
+            continue
+        items.append(
+            {
+                "university_name": uni.name if uni else "",
+                "year": s.year,
+                "month": s.month,
+                "registration_time": s.registration_time,
+                "material_deadline": s.material_deadline,
+                "exam_time": s.exam_time,
+                "reminder": s.reminder,
+            }
+        )
+    return {"matches": items}

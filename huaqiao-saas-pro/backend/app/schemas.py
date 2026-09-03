@@ -65,6 +65,25 @@ class CustomerVaultUpsert(BaseModel):
     profile: dict = Field(default_factory=dict)
 
 
+class StudentCreateIn(BaseModel):
+    profile: dict = Field(default_factory=dict)
+    wizard: bool = True
+
+
+class StudentSectionPatch(BaseModel):
+    data: dict = Field(default_factory=dict)
+
+
+class StudentEligibilityWriteback(BaseModel):
+    kind: str
+    result: str = ""
+    conclusion: str = ""
+    explanation: str = ""
+    record_id: int | None = None
+    policy_version: str = "R4.2"
+    confirm: bool = False
+
+
 class ExpertConsultationCreate(BaseModel):
     title: str = ""
     question: str = Field(..., min_length=4)
