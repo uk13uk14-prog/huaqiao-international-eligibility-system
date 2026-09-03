@@ -10,6 +10,7 @@ html.dark body { background: #0b1120; }
 .hero-lead { margin: 0; opacity: .88; line-height: 1.6; font-size: 15px; }
 .home-grid, .form-card, .result-screen .van-cell-group, .ai-screen .van-cell { margin-top: 12px; }
 .home-grid { margin-bottom: 8px; }
+.home-student-switch { margin: 12px 0; }
 .confirm-hint { margin: 0 16px 14px; font-size: 14px; color: #64748b; line-height: 1.6; }
 .dark .confirm-hint { color: #94a3b8; }
 .laws-anchor { scroll-margin-top: 100px; height: 1px; margin: 0; padding: 0; overflow: hidden; }

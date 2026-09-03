@@ -1,7 +1,16 @@
 <template>
   <div class="smp-mobile">
     <van-cell-group inset>
-      <van-field label="学生" is-link readonly :model-value="currentLabel" @click="showPicker = true" />
+      <van-cell title="当前学生" :value="currentLabel" />
+      <van-field
+        v-if="hasMultipleStudents"
+        label="切换学生"
+        is-link
+        readonly
+        :model-value="currentLabel"
+        placeholder="选择学生"
+        @click="openStudentPicker"
+      />
       <van-cell title="学生档案席位" :value="`${slots.student_profile_used || 0} / ${slots.student_profile_limit || 0}`" />
       <van-cell v-if="canCreate" title="剩余名额" :value="`${slots.student_profile_remaining || 0}`" />
       <div class="consult-actions" style="padding:12px;">
@@ -11,7 +20,12 @@
       </div>
     </van-cell-group>
     <van-popup v-model:show="showPicker" position="bottom">
-      <van-picker :columns="studentColumns" @confirm="onPickStudent" @cancel="showPicker=false" />
+      <van-picker
+        :columns="studentColumns"
+        :default-index="pickerDefaultIndex"
+        @confirm="onPickStudent"
+        @cancel="showPicker=false"
+      />
     </van-popup>
 
     <template v-if="profile">
@@ -239,6 +253,15 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
+import {
+  activeStudentId,
+  hasMultipleStudents,
+  loadForActiveStudent,
+  normalizeStudentId,
+  setActiveStudentId,
+  studentLabel,
+  syncStudentsAndActive,
+} from './activeStudent'
 import { getSaasToken, saasApi } from './saasApi'
 import { PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
@@ -256,7 +279,7 @@ const timelineGroupsUI = [
   { key: 'completed', label: '已完成' },
 ]
 const students = ref([])
-const studentId = ref(null)
+const loadedStudentId = ref(null)
 const profile = ref(null)
 const portrait = ref(null)
 const slots = ref({
@@ -280,8 +303,12 @@ const curriculaText = ref('')
 
 const wizardMode = computed(() => profile.value && !profile.value.wizard_completed)
 const saveLabel = computed(() => wizardMode.value ? '保存并继续' : '保存修改')
-const currentLabel = computed(() => students.value.find(s => s.id === studentId.value)?.display_name || '请选择学生')
-const studentColumns = computed(() => students.value.map(s => ({ text: s.display_name, value: s.id })))
+const currentLabel = computed(() => studentLabel(students.value, activeStudentId.value))
+const studentColumns = computed(() => students.value.map(s => ({ text: s.display_name || `学生 #${s.id}`, value: normalizeStudentId(s.id) })))
+const pickerDefaultIndex = computed(() => {
+  const idx = students.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
+  return idx >= 0 ? idx : 0
+})
 const currentSchool = computed(() => {
   const list = profile.value?.education?.history || []
   return list.find(s => s.is_current) || list[0]
@@ -313,6 +340,7 @@ function addMathBundle() {
 }
 
 function apply(r) {
+  loadedStudentId.value = normalizeStudentId(r.id)
   profile.value = r.profile
   completeness.value = r.completeness || { percent: 0, missing: [] }
   portrait.value = r.portrait || null
@@ -320,7 +348,6 @@ function apply(r) {
   if (r.dashboard?.timeline_summary) timelineSummary.value = r.dashboard.timeline_summary
   else if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
   curriculaText.value = (profile.value.courses.curricula || []).join(',')
-  studentId.value = r.id
 }
 
 function goSection(key) {
@@ -338,7 +365,8 @@ async function loadList() {
     const r = await saasApi.students()
     students.value = r.students || []
     if (r.slots) slots.value = r.slots
-    if (students.value[0] && !studentId.value) await open(students.value[0].id)
+    const resolved = syncStudentsAndActive(students.value)
+    if (resolved && loadedStudentId.value !== resolved) await open(resolved)
   } catch (e) {
     showFailToast(e.message || '加载失败')
   }
@@ -350,6 +378,7 @@ async function createStudent() {
   }
   try {
     const r = await saasApi.createStudent({ wizard: true, profile: {} })
+    setActiveStudentId(r.id, { allowUnknown: true })
     apply(r)
     section.value = 'basic_info'
     await loadList()
@@ -357,27 +386,40 @@ async function createStudent() {
   } catch (e) { showFailToast(e.message || '请先登录') }
 }
 async function open(id) {
-  const r = await saasApi.student(id)
-  apply(r)
+  const nid = normalizeStudentId(id)
+  if (!nid) return
+  setActiveStudentId(nid, { allowUnknown: true })
+  const result = await loadForActiveStudent(nid, (sid) => saasApi.student(sid))
+  if (!result.ok) {
+    if (result.reason === 'error') showFailToast(result.error?.message || '加载失败')
+    return
+  }
+  apply(result.data)
 }
-function onPickStudent({ selectedOptions }) {
+function openStudentPicker() {
+  showPicker.value = true
+}
+function onPickStudent(payload) {
   showPicker.value = false
-  const id = selectedOptions?.[0]?.value
+  const opt = payload?.selectedOptions?.[0]
+  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
   if (id) open(id)
 }
 async function save(key) {
-  if (!studentId.value) return
+  if (!activeStudentId.value) return
   if (key === 'portrait' || key === 'my_timeline') return
   if (key === 'courses') syncCurricula()
   saving.value = true
+  const sid = activeStudentId.value
   try {
-    const r = await saasApi.patchStudentSection(studentId.value, key, profile.value[key])
+    const r = await saasApi.patchStudentSection(sid, key, profile.value[key])
+    if (normalizeStudentId(r.id) !== normalizeStudentId(activeStudentId.value)) return
     apply(r)
     showSuccessToast('已保存')
     if (wizardMode.value) {
       const idx = wizardSections.findIndex(s => s.key === key)
       if (idx >= 0 && idx < wizardSections.length - 1) section.value = wizardSections[idx + 1].key
-      if (key === 'summary') await saasApi.completeStudentWizard(studentId.value)
+      if (key === 'summary') await saasApi.completeStudentWizard(sid)
     }
     await loadList()
   } catch (e) { showFailToast(e.message || '保存失败') }
@@ -386,7 +428,7 @@ async function save(key) {
 function goJudge(kind) {
   emit('goto-judge', {
     kind,
-    studentId: studentId.value,
+    studentId: activeStudentId.value,
     prefills: {
       name: profile.value.basic_info.chinese_name || profile.value.basic_info.english_name,
       birth_date: profile.value.basic_info.birth_date,
@@ -399,36 +441,48 @@ function goJudge(kind) {
   })
 }
 async function confirmWB(kind) {
+  const sid = activeStudentId.value
+  if (!sid) return
   const card = profile.value.identity[kind]
-  const r = await saasApi.studentWriteback(studentId.value, { kind, result: card.engine_result, conclusion: card.conclusion, record_id: card.record_id, policy_version: card.policy_version || 'R4.2', confirm: true })
+  const r = await saasApi.studentWriteback(sid, { kind, result: card.engine_result, conclusion: card.conclusion, record_id: card.record_id, policy_version: card.policy_version || 'R4.2', confirm: true })
+  if (normalizeStudentId(r.id) !== normalizeStudentId(activeStudentId.value)) return
   apply(r)
   showSuccessToast('已确认写入学生档案')
 }
 async function loadTimeline() {
-  const r = await saasApi.studentTimeline(studentId.value)
+  const sid = activeStudentId.value
+  if (!sid) return
+  const r = await saasApi.studentTimeline(sid)
+  if (normalizeStudentId(activeStudentId.value) !== sid) return
   timeline.value = r.matches || []
 }
 async function refreshPortrait() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    const r = await saasApi.studentPortrait(studentId.value)
+    const r = await saasApi.studentPortrait(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     portrait.value = r.portrait
     if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
   } catch (e) { showFailToast(e.message || '刷新失败') }
 }
 async function loadMyTimeline() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    const r = await saasApi.studentTimelineItems(studentId.value)
+    const r = await saasApi.studentTimelineItems(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     timelineGroups.value = r.groups || timelineGroups.value
     timelineSummary.value = r.summary || timelineSummary.value
   } catch (e) { showFailToast(e.message || '加载时间轴失败') }
 }
 async function regenerateTimeline() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   timelineBusy.value = true
   try {
-    const r = await saasApi.regenerateStudentTimeline(studentId.value)
+    const r = await saasApi.regenerateStudentTimeline(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     timelineGroups.value = r.groups || {}
     timelineSummary.value = r.summary || timelineSummary.value
     if (r.portrait) portrait.value = r.portrait
@@ -437,27 +491,36 @@ async function regenerateTimeline() {
   finally { timelineBusy.value = false }
 }
 async function patchItem(it, status) {
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    await saasApi.patchTimelineItem(studentId.value, it.id, { status })
+    await saasApi.patchTimelineItem(sid, it.id, { status })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     await loadMyTimeline()
     await refreshPortrait()
   } catch (e) { showFailToast(e.message || '更新失败') }
 }
 async function editNote(it) {
+  const sid = activeStudentId.value
+  if (!sid) return
   const note = window.prompt('学生备注', it.student_note || '')
   if (note === null) return
   try {
-    await saasApi.patchTimelineItem(studentId.value, it.id, { student_note: note })
+    await saasApi.patchTimelineItem(sid, it.id, { student_note: note })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     await loadMyTimeline()
   } catch (e) { showFailToast(e.message || '备注失败') }
 }
 async function createManual() {
+  const sid = activeStudentId.value
+  if (!sid) return
   if (!manualForm.value.title.trim()) {
     showFailToast('请填写标题')
     return
   }
   try {
-    await saasApi.createManualTimeline(studentId.value, { ...manualForm.value })
+    await saasApi.createManualTimeline(sid, { ...manualForm.value })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     showManual.value = false
     manualForm.value = { title: '', deadline: '', university_name: '', student_note: '' }
     await loadMyTimeline()
@@ -487,6 +550,11 @@ watch(section, (key) => {
   if (key === 'portrait') refreshPortrait()
   if (key === 'my_timeline') loadMyTimeline()
 })
+watch(activeStudentId, (id) => {
+  const nid = normalizeStudentId(id)
+  if (!nid || nid === loadedStudentId.value) return
+  open(nid)
+})
 onMounted(loadList)
-defineExpose({ loadList })
+defineExpose({ loadList, openStudent: open })
 </script>

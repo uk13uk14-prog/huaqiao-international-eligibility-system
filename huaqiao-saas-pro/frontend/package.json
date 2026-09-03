@@ -3,7 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {"dev": "vite --host 0.0.0.0 --port 5180", "build": "vite build", "preview": "vite preview --host 0.0.0.0 --port 4180"},
-  "dependencies": {"@element-plus/icons-vue": "latest", "element-plus": "latest", "vue": "latest"},
-  "devDependencies": {"@vitejs/plugin-vue": "latest", "vite": "latest"}
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5180",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4180",
+    "test": "node --test tests/activeStudent.test.js"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "latest",
+    "element-plus": "latest",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "vite": "latest"
+  }
 }

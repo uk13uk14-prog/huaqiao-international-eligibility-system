@@ -27,8 +27,19 @@
     </el-alert>
 
     <div class="smp-student-bar">
-      <el-select v-model="studentId" placeholder="选择学生" filterable style="min-width:240px" @change="openStudent">
-        <el-option v-for="s in students" :key="s.id" :label="`${s.display_name}（完整度 ${s.completeness?.percent || 0}%）`" :value="s.id" />
+      <el-select
+        :model-value="activeStudentId"
+        placeholder="选择学生"
+        filterable
+        style="min-width:240px"
+        @change="onSelectStudent"
+      >
+        <el-option
+          v-for="s in students"
+          :key="s.id"
+          :label="`${s.display_name}（完整度 ${s.completeness?.percent || 0}%）`"
+          :value="normalizeStudentId(s.id)"
+        />
       </el-select>
       <el-tag v-if="profile" type="info">{{ wizardMode ? '建档向导' : '档案管理' }}</el-tag>
       <el-tag v-if="slots.student_profile_over_quota" type="warning">超额 {{ slots.student_profile_over_quota }}（已有档案可继续查看编辑）</el-tag>
@@ -433,6 +444,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from './api'
+import {
+  activeStudentId,
+  loadForActiveStudent,
+  normalizeStudentId,
+  setActiveStudentId,
+  syncStudentsAndActive,
+} from './activeStudent'
 import { CURRICULUMS, GRADE_TYPES, LANGUAGE_EXAMS, OTHER_EXAM_TYPES, PRIORITY_LEVELS, SCHOOL_TYPES, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
 const emit = defineEmits(['goto-judge', 'goto-member'])
@@ -456,7 +474,8 @@ const timelineGroupsUI = [
 ]
 
 const students = ref([])
-const studentId = ref(null)
+/** Last successfully applied profile student_id (race-guard companion). */
+const loadedStudentId = ref(null)
 const profile = ref(null)
 const portrait = ref(null)
 const dashboard = ref(null)
@@ -515,16 +534,16 @@ function goSection(key) {
   section.value = key
   if (key === 'portrait') refreshPortrait()
   if (key === 'my_timeline') loadMyTimeline()
-  if (key === 'summary' && studentId.value) openStudent(studentId.value)
+  if (key === 'summary' && activeStudentId.value) openStudent(activeStudentId.value)
 }
 
 async function loadList() {
   const r = await api.students()
   students.value = r.students || []
   if (r.slots) slots.value = r.slots
-  if (!studentId.value && students.value[0]) {
-    studentId.value = students.value[0].id
-    await openStudent(studentId.value)
+  const resolved = syncStudentsAndActive(students.value)
+  if (resolved && loadedStudentId.value !== resolved) {
+    await openStudent(resolved)
   }
 }
 async function createStudent() {
@@ -534,7 +553,7 @@ async function createStudent() {
   }
   try {
     const r = await api.createStudent({ wizard: true, profile: {} })
-    studentId.value = r.id
+    setActiveStudentId(r.id, { allowUnknown: true })
     applyPayload(r)
     if (r.slots) slots.value = r.slots
     section.value = 'basic_info'
@@ -544,12 +563,22 @@ async function createStudent() {
     ElMessage.error(e.message || '创建失败')
   }
 }
+function onSelectStudent(id) {
+  openStudent(id)
+}
 async function openStudent(id) {
-  if (!id) return
-  const r = await api.student(id)
-  applyPayload(r)
+  const nid = normalizeStudentId(id)
+  if (!nid) return
+  setActiveStudentId(nid, { allowUnknown: true })
+  const result = await loadForActiveStudent(nid, (sid) => api.student(sid))
+  if (!result.ok) {
+    if (result.reason === 'error') ElMessage.error(result.error?.message || '加载学生失败')
+    return
+  }
+  applyPayload(result.data)
 }
 function applyPayload(r) {
+  loadedStudentId.value = normalizeStudentId(r.id)
   profile.value = r.profile
   completeness.value = r.completeness || { percent: 0, missing: [] }
   portrait.value = r.portrait || null
@@ -560,19 +589,20 @@ function applyPayload(r) {
 }
 
 async function saveSection(key) {
-  if (!studentId.value || !profile.value) return
+  if (!activeStudentId.value || !profile.value) return
   if (key === 'portrait' || key === 'my_timeline') return
   saving.value = true
   try {
-    const r = await api.patchStudentSection(studentId.value, key, profile.value[key])
+    const r = await api.patchStudentSection(activeStudentId.value, key, profile.value[key])
+    if (normalizeStudentId(r.id) !== normalizeStudentId(activeStudentId.value)) return
     applyPayload(r)
     ElMessage.success('已保存')
     if (wizardMode.value) {
       const idx = wizardSections.findIndex(s => s.key === key)
       if (idx >= 0 && idx < wizardSections.length - 1) section.value = wizardSections[idx + 1].key
       if (key === 'summary') {
-        await api.completeStudentWizard(studentId.value)
-        await openStudent(studentId.value)
+        await api.completeStudentWizard(activeStudentId.value)
+        await openStudent(activeStudentId.value)
       }
     }
     await loadList()
@@ -619,7 +649,7 @@ function onUniPick(t) {
 }
 
 function goJudge(kind) {
-  emit('goto-judge', { kind, studentId: studentId.value, prefills: {
+  emit('goto-judge', { kind, studentId: activeStudentId.value, prefills: {
     name: profile.value.basic_info.chinese_name || profile.value.basic_info.english_name,
     birth_date: profile.value.basic_info.birth_date,
     current_nationality: profile.value.identity.current_nationality,
@@ -631,58 +661,72 @@ function goJudge(kind) {
   }})
 }
 async function confirmWriteback(kind) {
+  const sid = activeStudentId.value
+  if (!sid) return
   const card = profile.value.identity[kind]
-  const r = await api.studentWriteback(studentId.value, { kind, result: card.engine_result, conclusion: card.conclusion, record_id: card.record_id, policy_version: card.policy_version || 'R4.2', confirm: true })
+  const r = await api.studentWriteback(sid, { kind, result: card.engine_result, conclusion: card.conclusion, record_id: card.record_id, policy_version: card.policy_version || 'R4.2', confirm: true })
+  if (normalizeStudentId(r.id) !== normalizeStudentId(activeStudentId.value)) return
   applyPayload(r)
   ElMessage.success('已确认写入学生档案')
 }
 async function loadTimeline() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    const r = await api.studentTimeline(studentId.value)
+    const r = await api.studentTimeline(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     timeline.value = r.matches || []
   } catch (e) {
-    ElMessage.error(e.message || '读取时间线失败')
+    if (normalizeStudentId(activeStudentId.value) === sid) ElMessage.error(e.message || '读取时间线失败')
   }
 }
 async function refreshPortrait() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    const r = await api.studentPortrait(studentId.value)
+    const r = await api.studentPortrait(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     portrait.value = r.portrait
     if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
   } catch (e) {
-    ElMessage.error(e.message || '刷新画像失败')
+    if (normalizeStudentId(activeStudentId.value) === sid) ElMessage.error(e.message || '刷新画像失败')
   }
 }
 async function loadMyTimeline() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    const r = await api.studentTimelineItems(studentId.value)
+    const r = await api.studentTimelineItems(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     timelineGroups.value = r.groups || timelineGroups.value
     timelineSummary.value = r.summary || timelineSummary.value
   } catch (e) {
-    ElMessage.error(e.message || '加载时间轴失败')
+    if (normalizeStudentId(activeStudentId.value) === sid) ElMessage.error(e.message || '加载时间轴失败')
   }
 }
 async function regenerateTimeline() {
-  if (!studentId.value) return
+  const sid = activeStudentId.value
+  if (!sid) return
   timelineBusy.value = true
   try {
-    const r = await api.regenerateStudentTimeline(studentId.value)
+    const r = await api.regenerateStudentTimeline(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     timelineGroups.value = r.groups || {}
     timelineSummary.value = r.summary || timelineSummary.value
     if (r.portrait) portrait.value = r.portrait
     ElMessage.success('已重新生成个人时间轴（保留完成状态/备注/手工事项）')
   } catch (e) {
-    ElMessage.error(e.message || '生成失败')
+    if (normalizeStudentId(activeStudentId.value) === sid) ElMessage.error(e.message || '生成失败')
   } finally {
     timelineBusy.value = false
   }
 }
 async function patchItem(it, status) {
+  const sid = activeStudentId.value
+  if (!sid) return
   try {
-    await api.patchTimelineItem(studentId.value, it.id, { status })
+    await api.patchTimelineItem(sid, it.id, { status })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     await loadMyTimeline()
     await refreshPortrait()
   } catch (e) {
@@ -690,22 +734,28 @@ async function patchItem(it, status) {
   }
 }
 async function editNote(it) {
+  const sid = activeStudentId.value
+  if (!sid) return
   const note = window.prompt('学生备注', it.student_note || '')
   if (note === null) return
   try {
-    await api.patchTimelineItem(studentId.value, it.id, { student_note: note })
+    await api.patchTimelineItem(sid, it.id, { student_note: note })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     await loadMyTimeline()
   } catch (e) {
     ElMessage.error(e.message || '备注失败')
   }
 }
 async function createManual() {
+  const sid = activeStudentId.value
+  if (!sid) return
   if (!manualForm.value.title.trim()) {
     ElMessage.warning('请填写标题')
     return
   }
   try {
-    await api.createManualTimeline(studentId.value, { ...manualForm.value })
+    await api.createManualTimeline(sid, { ...manualForm.value })
+    if (normalizeStudentId(activeStudentId.value) !== sid) return
     showManual.value = false
     manualForm.value = { title: '', deadline: '', university_name: '', student_note: '' }
     await loadMyTimeline()
@@ -741,11 +791,20 @@ onMounted(async () => {
   await loadList()
 })
 
+/** External switches (home topbar) must reload profile when this page is mounted. */
+watch(activeStudentId, (id) => {
+  const nid = normalizeStudentId(id)
+  if (!nid) return
+  if (nid === loadedStudentId.value) return
+  openStudent(nid)
+})
+
 watch(section, () => { window.scrollTo({ top: 0, behavior: 'smooth' }) })
 
 defineExpose({ openStudent, loadList, applyWriteback: async (kind, result) => {
-  if (!studentId.value || !result) return
-  const r = await api.studentWriteback(studentId.value, {
+  if (!activeStudentId.value || !result) return
+  const sid = activeStudentId.value
+  const r = await api.studentWriteback(sid, {
     kind,
     result: result.result,
     conclusion: result.conclusion || result.explanation,
@@ -753,6 +812,7 @@ defineExpose({ openStudent, loadList, applyWriteback: async (kind, result) => {
     policy_version: 'R4.2',
     confirm: false,
   })
+  if (normalizeStudentId(r.id) !== normalizeStudentId(activeStudentId.value)) return
   applyPayload(r)
 }})
 </script>

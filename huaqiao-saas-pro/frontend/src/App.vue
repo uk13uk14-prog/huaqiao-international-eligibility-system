@@ -37,7 +37,28 @@
     <template v-else>
       <header class="topbar">
         <div><h1>{{ text.systemName }}</h1><p>{{ user.email }} · {{ planText }}</p></div>
-        <div class="top-actions"><el-switch v-model="darkMode" class="theme-switch" size="small" inline-prompt :active-text="text.themeDark" :inactive-text="text.themeLight" @change="persistSaasTheme" /><el-button type="primary" plain @click="openConsultDialog">{{ text.consultPlanning }}</el-button><el-segmented v-model="lang" :options="langOptions" size="small"/><el-tag :type="user.features.paid ? 'success' : 'warning'">{{ user.plan_code }}</el-tag><el-button @click="logout">{{ text.logout }}</el-button></div>
+        <div class="top-actions">
+          <div v-if="accessibleStudents.length" class="student-switcher" data-testid="home-student-switcher">
+            <span class="student-switcher-label">当前学生</span>
+            <strong class="student-switcher-name">{{ activeStudentLabel }}</strong>
+            <el-dropdown v-if="hasMultipleStudents" trigger="click" @command="onHomeSwitchStudent">
+              <el-button size="small" type="primary" plain>切换</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="s in accessibleStudents"
+                    :key="s.id"
+                    :command="normalizeStudentId(s.id)"
+                    :disabled="normalizeStudentId(s.id) === activeStudentId"
+                  >
+                    <span :class="{ 'is-active-student': normalizeStudentId(s.id) === activeStudentId }">{{ s.display_name }}</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+          <el-switch v-model="darkMode" class="theme-switch" size="small" inline-prompt :active-text="text.themeDark" :inactive-text="text.themeLight" @change="persistSaasTheme" /><el-button type="primary" plain @click="openConsultDialog">{{ text.consultPlanning }}</el-button><el-segmented v-model="lang" :options="langOptions" size="small"/><el-tag :type="user.features.paid ? 'success' : 'warning'">{{ user.plan_code }}</el-tag><el-button @click="logout">{{ text.logout }}</el-button>
+        </div>
       </header>
       <main class="layout">
         <aside class="sidebar">
@@ -151,6 +172,16 @@
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, setToken } from './api'
+import {
+  accessibleStudents,
+  activeStudentId,
+  activeStudentLabel,
+  clearActiveStudent,
+  hasMultipleStudents,
+  normalizeStudentId,
+  setActiveStudentId,
+  syncStudentsAndActive,
+} from './activeStudent'
 import StudentProfile from './StudentProfile.vue'
 
 const user = ref(null), loading = ref(false), authTab = ref('login'), tab = ref('internationalDashboard'), unlockVisible = ref(false)
@@ -185,9 +216,29 @@ const paymentDialog = ref(false), selectedPlan = ref(null), paymentChannel = ref
 const users = ref([]), codes = ref([]), stats = ref({}), newCode = ref({plan_code:'vip_month', duration_days:30, count:1})
 const assistant = ref({context:'', question:'', answer:''})
 const studentProfileRef = ref(null)
-const profileStudentId = ref(localStorage.getItem('smp_student_id') ? Number(localStorage.getItem('smp_student_id')) : null)
+/** Judge writeback uses shared activeStudentId (stable student_id). */
+const profileStudentId = activeStudentId
 const form = ref({name:'', birth_date:'', current_nationality:'', has_chinese_nationality:false, has_foreign_nationality:true, foreign_nationality_acquired_date:'', settled_abroad:true, permanent_residence_country:'', overseas_residence_months_last_2y:0, overseas_residence_months_last_4y:24, annual_months_overseas:9, has_mainland_household:false, has_denationalization_certificate:false, denationalization_certificate_info:'', parent_chinese_citizen:false, parent_settled_abroad_at_birth:false, born_abroad:false, intended_field:'综合', score:null, passport_info:'', household_info:'', complex_situation:''})
 const planText = computed(() => user.value?.features?.paid ? text.value.paidPlanText : text.value.freePlanText)
+
+async function refreshStudentSwitcher() {
+  try {
+    const r = await api.students()
+    syncStudentsAndActive(r.students || [])
+  } catch {
+    /* not logged in / no students yet */
+  }
+}
+function onHomeSwitchStudent(id) {
+  const ok = setActiveStudentId(id)
+  if (!ok) {
+    ElMessage.warning('无法切换到该学生')
+    return
+  }
+  if (tab.value === 'studentProfile' && studentProfileRef.value?.openStudent) {
+    studentProfileRef.value.openStudent(id)
+  }
+}
 
 const MEMBER_PLAN_ORDER = ['free', 'vip_month', 'vip_year', 'vip_three_year', 'lifetime']
 function planSortKey(code) {
@@ -204,10 +255,10 @@ function formatPlanDuration(p) {
   return `${d} 天`
 }
 
-async function boot(){ try{ user.value = await api.me(); await loadTab('internationalDashboard') }catch{} }
-async function doLogin(){ loading.value=true; try{ const r=await api.login(login.value); setToken(r.token); user.value=r.user; await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-async function doRegister(){ loading.value=true; try{ const r=await api.register(register.value); setToken(r.token); user.value=r.user; await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
-function logout(){ localStorage.removeItem('saas_token'); location.reload() }
+async function boot(){ try{ user.value = await api.me(); await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch{} }
+async function doLogin(){ loading.value=true; try{ const r=await api.login(login.value); setToken(r.token); user.value=r.user; await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
+async function doRegister(){ loading.value=true; try{ const r=await api.register(register.value); setToken(r.token); user.value=r.user; await refreshStudentSwitcher(); await loadTab('internationalDashboard') }catch(e){ ElMessage.error(e.message) }finally{ loading.value=false } }
+function logout(){ clearActiveStudent(); localStorage.removeItem('saas_token'); location.reload() }
 function startJudge(type){ judgeType.value=type; tab.value='judge'; target.value=type; applyJudgeDefaults(type) }
 function applyJudgeDefaults(type){
   if(type==='huaqiao') Object.assign(form.value, {has_chinese_nationality:true, has_foreign_nationality:false, settled_abroad:true, has_mainland_household:false, overseas_residence_months_last_2y:18, overseas_residence_months_last_4y:0, annual_months_overseas:0, has_denationalization_certificate:false})
@@ -215,10 +266,9 @@ function applyJudgeDefaults(type){
 }
 watch(judgeType, applyJudgeDefaults)
 async function refreshMe(){ user.value = await api.me() }
-async function loadTab(name){ tab.value=name; if(name==='laws') await loadLaws(); if(name==='universities') await loadUniversities(); if(name==='schedules') await loadSchedules(); if(name==='history') await loadRecords(); if(name==='member'){ plans.value=await api.plans(); orders.value=await api.orders() } if(name==='admin'){ stats.value=await api.adminStats(); users.value=await api.adminUsers(); codes.value=await api.adminCodes(); plans.value=await api.adminPlans() } }
+async function loadTab(name){ tab.value=name; if(name==='laws') await loadLaws(); if(name==='universities') await loadUniversities(); if(name==='schedules') await loadSchedules(); if(name==='history') await loadRecords(); if(name==='member'){ plans.value=await api.plans(); orders.value=await api.orders() } if(name==='admin'){ stats.value=await api.adminStats(); users.value=await api.adminUsers(); codes.value=await api.adminCodes(); plans.value=await api.adminPlans() } if(name==='studentProfile') await refreshStudentSwitcher() }
 function onGotoJudgeFromProfile(payload){
-  profileStudentId.value = payload.studentId
-  localStorage.setItem('smp_student_id', String(payload.studentId || ''))
+  setActiveStudentId(payload.studentId, { allowUnknown: true })
   judgeType.value = payload.kind
   Object.assign(form.value, payload.prefills || {})
   tab.value = 'judge'

@@ -19,6 +19,26 @@
           <h1>国际生/华侨生资格判定系统</h1>
           <p class="hero-lead">欢迎使用</p>
         </div>
+        <van-cell-group v-if="accessibleStudents.length" inset class="home-student-switch">
+          <van-cell title="当前学生" :value="activeStudentLabel" />
+          <van-field
+            v-if="hasMultipleStudents"
+            label="切换"
+            is-link
+            readonly
+            :model-value="activeStudentLabel"
+            placeholder="选择学生"
+            @click="showHomeStudentPicker = true"
+          />
+        </van-cell-group>
+        <van-popup v-model:show="showHomeStudentPicker" position="bottom">
+          <van-picker
+            :columns="homeStudentColumns"
+            :default-index="homePickerDefaultIndex"
+            @confirm="onHomePickStudent"
+            @cancel="showHomeStudentPicker=false"
+          />
+        </van-popup>
         <van-grid :column-num="2" :gutter="10" class="home-grid">
           <van-grid-item icon="award-o" text="国际生判定" @click="openJudge('international')" />
           <van-grid-item icon="passed" text="华侨生判定" @click="openJudge('huaqiao')" />
@@ -361,6 +381,16 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
+import {
+  accessibleStudents,
+  activeStudentId,
+  activeStudentLabel,
+  clearActiveStudent,
+  hasMultipleStudents,
+  normalizeStudentId,
+  setActiveStudentId,
+  syncStudentsAndActive,
+} from './activeStudent'
 import { api } from './api'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
 import StudentProfile from './StudentProfile.vue'
@@ -428,7 +458,30 @@ const expertDetailShow = ref(false)
 const expertDetail = ref(null)
 const expertDetailLoading = ref(false)
 const reminderList = ref([])
-const profileStudentId = ref(localStorage.getItem('smp_student_id') ? Number(localStorage.getItem('smp_student_id')) : null)
+const profileStudentId = activeStudentId
+const showHomeStudentPicker = ref(false)
+const homeStudentColumns = computed(() => accessibleStudents.value.map(s => ({
+  text: s.display_name || `学生 #${s.id}`,
+  value: normalizeStudentId(s.id),
+})))
+const homePickerDefaultIndex = computed(() => {
+  const idx = accessibleStudents.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
+  return idx >= 0 ? idx : 0
+})
+
+async function refreshStudentSwitcher() {
+  if (!getSaasToken()) return
+  try {
+    const r = await saasApi.students()
+    syncStudentsAndActive(r.students || [])
+  } catch { /* ignore */ }
+}
+function onHomePickStudent(payload) {
+  showHomeStudentPicker.value = false
+  const opt = payload?.selectedOptions?.[0]
+  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
+  if (id) setActiveStudentId(id)
+}
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
 const fieldColumns = fieldValues.map(text => ({ text, value: text }))
@@ -556,6 +609,9 @@ function openPage(name) {
   if (name === 'universities' || name === 'schedule') {
     targetFilter.value = eligibilityContext.value
   }
+  if (name === 'profile' || name === 'home') {
+    refreshStudentSwitcher()
+  }
   pushTab(name)
   onTabChange(name)
 }
@@ -585,6 +641,7 @@ async function doSaasLogin() {
     setSaasToken(r.token)
     saasUser.value = r.user
     showSuccessToast('登录成功')
+    await refreshStudentSwitcher()
     await loadVaultFromSources()
     await loadExpertList()
     await loadReminders()
@@ -600,6 +657,7 @@ async function doSaasLogin() {
 function doSaasLogout() {
   setSaasToken('')
   saasUser.value = null
+  clearActiveStudent()
   expertList.value = []
   reminderList.value = []
 }
@@ -776,8 +834,7 @@ function openJudge(type, prefills) {
 }
 
 function onGotoJudgeFromProfile(payload) {
-  profileStudentId.value = payload.studentId
-  localStorage.setItem('smp_student_id', String(payload.studentId || ''))
+  setActiveStudentId(payload.studentId, { allowUnknown: true })
   openJudge(payload.kind, payload.prefills)
 }
 
@@ -976,6 +1033,7 @@ onMounted(async () => {
     platform: detectPlatform(),
   })
   await refreshSaasUser()
+  await refreshStudentSwitcher()
   await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
 })
 </script>
