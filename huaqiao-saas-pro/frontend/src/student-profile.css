@@ -20,8 +20,13 @@
 .smp-facts { line-height: 1.8; }
 .smp-complete { display: flex; gap: 18px; align-items: center; margin-bottom: 16px; }
 .smp-steps { margin-bottom: 16px; }
+.smp-dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.smp-dash-block { background: #fff; border: 1px solid #eadfcd; border-radius: 14px; padding: 12px 14px; overflow: hidden; }
+.smp-dash-block h4 { margin: 0 0 8px; color: #123c69; }
+.smp-dash-block ul { margin: 0; padding-left: 18px; line-height: 1.7; }
+.smp { max-width: 100%; overflow-x: hidden; }
 @media (max-width: 980px) {
-  .smp-layout, .smp-verdicts, .smp-grid { grid-template-columns: 1fr; }
-  .smp-nav { flex-direction: row; overflow-x: auto; }
+  .smp-layout, .smp-verdicts, .smp-grid, .smp-dash-grid { grid-template-columns: 1fr; }
+  .smp-nav { flex-direction: row; overflow-x: auto; max-width: 100%; }
   .smp-nav button { white-space: nowrap; }
 }

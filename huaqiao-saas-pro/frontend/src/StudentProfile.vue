@@ -21,11 +21,11 @@
 
     <template v-if="profile">
       <el-steps v-if="wizardMode" :active="wizardIndex" finish-status="success" class="smp-steps" align-center>
-        <el-step v-for="sec in sections" :key="sec.key" :title="sec.label" @click="section = sec.key" />
+        <el-step v-for="sec in wizardSections" :key="sec.key" :title="sec.label" @click="section = sec.key" />
       </el-steps>
       <div class="smp-layout">
         <aside class="smp-nav">
-          <button v-for="sec in sections" :key="sec.key" :class="{active: section===sec.key}" type="button" @click="section=sec.key">{{ sec.label }}</button>
+          <button v-for="sec in sections" :key="sec.key" :class="{active: section===sec.key}" type="button" @click="goSection(sec.key)">{{ sec.label }}</button>
         </aside>
         <div class="smp-panel">
           <section v-show="section==='basic_info'" class="smp-card">
@@ -243,31 +243,169 @@
           </section>
 
           <section v-show="section==='summary'" class="smp-card">
-            <h3>档案总览</h3>
+            <h3>档案总览 · Dashboard</h3>
             <div class="smp-complete">
               <el-progress type="circle" :percentage="completeness.percent || 0" />
               <div>
-                <p>PROFILE COMPLETENESS {{ completeness.percent || 0 }}%</p>
-                <p class="muted">缺失只做提示，不强制一次填完。</p>
-                <ul>
-                  <li v-for="m in completeness.missing || []" :key="m">{{ m }}</li>
-                </ul>
+                <p>档案完整度 {{ completeness.percent || 0 }}%</p>
+                <p>申请准备度 {{ readinessScore }}%</p>
+                <p class="muted">由档案事实透明汇总，非录取概率。</p>
               </div>
             </div>
-            <el-descriptions :column="2" border>
-              <el-descriptions-item label="姓名">{{ profile.basic_info.chinese_name }} {{ profile.basic_info.english_name }}</el-descriptions-item>
-              <el-descriptions-item label="出生日期">{{ profile.basic_info.birth_date || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="当前学校">{{ profile.education.current_school.school_name || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="课程体系">{{ (profile.courses.curricula||[]).join(' / ') || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="主要课程">{{ (profile.courses.items||[]).map(c=>c.subject).filter(Boolean).join('、') || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="语言成绩">{{ (profile.courses.language_exams||[]).map(e=>`${e.exam_type} ${e.overall_score}`).join('、') || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="国际生">{{ statusLabel[profile.identity.international.status] }}</el-descriptions-item>
-              <el-descriptions-item label="华侨生">{{ statusLabel[profile.identity.huaqiao.status] }}</el-descriptions-item>
-              <el-descriptions-item label="预计入学">{{ profile.basic_info.intended_entry_year || '—' }}</el-descriptions-item>
-              <el-descriptions-item label="目标大学">{{ profile.goals.targets.map(t=>`${t.university_name}（${priorityLabel(t.priority_level)}）`).join('、') || '—' }}</el-descriptions-item>
-            </el-descriptions>
+            <div class="smp-dash-grid">
+              <div class="smp-dash-block">
+                <h4>核心信息</h4>
+                <p>{{ portrait?.basic?.chinese_name || profile.basic_info.chinese_name }} {{ portrait?.basic?.english_name || '' }}</p>
+                <p class="muted">{{ portrait?.basic?.current_school || '—' }} · {{ portrait?.basic?.current_grade || '—' }} · 入学 {{ portrait?.basic?.intended_entry_year || '—' }}</p>
+                <el-button link type="primary" @click="section='portrait'">查看学生画像</el-button>
+              </div>
+              <div class="smp-dash-block">
+                <h4>身份状态</h4>
+                <p>国际生：{{ statusLabel[portrait?.identity?.international?.status || profile.identity.international.status] }}</p>
+                <p>华侨生：{{ statusLabel[portrait?.identity?.huaqiao?.status || profile.identity.huaqiao.status] }}</p>
+                <el-button link type="primary" @click="section='identity'">身份与国籍</el-button>
+              </div>
+              <div class="smp-dash-block">
+                <h4>学术 / 语言</h4>
+                <p>{{ (portrait?.academic?.curricula || profile.courses.curricula || []).join(' / ') || '—' }}</p>
+                <p class="muted">{{ portrait?.language?.summary || '语言成绩缺失' }}</p>
+                <el-button link type="primary" @click="section='courses'">课程与成绩</el-button>
+              </div>
+              <div class="smp-dash-block">
+                <h4>目标结构</h4>
+                <p>冲刺 {{ targetCounts.reach || 0 }} · 主申 {{ targetCounts.target || 0 }} · 稳妥 {{ targetCounts.match || 0 }} · 保底 {{ targetCounts.safety || 0 }}</p>
+                <el-button link type="primary" @click="section='goals'">升学目标</el-button>
+              </div>
+            </div>
+            <div class="smp-dash-grid">
+              <div class="smp-dash-block">
+                <h4>风险提示</h4>
+                <ul><li v-for="r in (portrait?.risk_flags || [])" :key="r">{{ r }}</li></ul>
+                <p v-if="!(portrait?.risk_flags||[]).length" class="muted">暂无结构风险提示</p>
+              </div>
+              <div class="smp-dash-block">
+                <h4>下一步行动</h4>
+                <ul>
+                  <li v-for="a in (portrait?.next_actions || [])" :key="a.code">
+                    <el-button link type="primary" @click="runAction(a)">{{ a.label }}</el-button>
+                  </li>
+                </ul>
+              </div>
+              <div class="smp-dash-block">
+                <h4>未来 30 天</h4>
+                <p>共 {{ timelineSummary.next_30_count || 0 }} 项</p>
+                <ul><li v-for="it in (timelineSummary.next_30 || [])" :key="it.id">{{ it.deadline || '日期待确认' }} · {{ it.title }}</li></ul>
+                <el-button link type="primary" @click="goSection('my_timeline')">进入升学时间轴</el-button>
+              </div>
+              <div class="smp-dash-block">
+                <h4>未来 90 天 / 逾期</h4>
+                <p>未来90天 {{ timelineSummary.next_90_count || 0 }} · 逾期 {{ timelineSummary.overdue_count || 0 }}</p>
+                <ul><li v-for="it in (timelineSummary.next_90 || [])" :key="it.id">{{ it.deadline || '日期待确认' }} · {{ it.title }}</li></ul>
+              </div>
+            </div>
             <el-form-item class="mt" label="备注"><el-input v-model="profile.summary.summary_notes" type="textarea" :rows="3" /></el-form-item>
             <div class="smp-save"><el-button type="primary" :loading="saving" @click="saveSection('summary')">{{ saveLabel }}</el-button></div>
+          </section>
+
+          <section v-show="section==='portrait'" class="smp-card">
+            <div class="smp-save" style="margin-top:0">
+              <h3 style="margin:0;flex:1">学生画像</h3>
+              <el-button @click="refreshPortrait">刷新画像</el-button>
+            </div>
+            <p class="muted">由 Student Master Profile 自动生成（v{{ portrait?.portrait_version || '—' }} · {{ portrait?.portrait_generated_at || '—' }}），不覆盖资格判定引擎结果。</p>
+            <h4>基础画像</h4>
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="姓名">{{ portrait?.basic?.chinese_name }} {{ portrait?.basic?.english_name }}</el-descriptions-item>
+              <el-descriptions-item label="年龄">{{ portrait?.basic?.age ?? '—' }}</el-descriptions-item>
+              <el-descriptions-item label="当前国家">{{ portrait?.basic?.current_country || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="当前学校">{{ portrait?.basic?.current_school || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="年级">{{ portrait?.basic?.current_grade || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="课程体系">{{ (portrait?.basic?.curricula||[]).join(' / ') || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="预计入学">{{ portrait?.basic?.intended_entry_year || '—' }}</el-descriptions-item>
+            </el-descriptions>
+            <h4>学术画像</h4>
+            <p>优势：{{ (portrait?.academic?.academic_strengths||[]).join('；') || '暂无' }}</p>
+            <p>关注：{{ (portrait?.academic?.academic_weaknesses||[]).join('；') || '暂无' }}</p>
+            <p class="muted">{{ portrait?.academic?.grade_trend }} · {{ portrait?.academic?.curriculum_rigor }}</p>
+            <p class="muted">缺失：{{ (portrait?.academic?.missing_academic_data||[]).join('、') || '无' }}</p>
+            <h4>语言画像</h4>
+            <ul>
+              <li v-for="ex in (portrait?.language?.exams||[])" :key="ex.exam_type + ex.exam_date">{{ ex.exam_type }} {{ ex.overall_score || '—' }} · {{ ex.status }}</li>
+            </ul>
+            <h4>身份画像</h4>
+            <div class="smp-verdicts">
+              <el-card>
+                <h4>International Student Eligibility</h4>
+                <p>{{ statusLabel[portrait?.identity?.international?.status] || '尚未判定' }}</p>
+                <p v-if="portrait?.identity?.international?.prompt" class="muted">{{ portrait.identity.international.prompt }}</p>
+                <el-button type="primary" @click="goJudge('international')">前往国际生判定</el-button>
+              </el-card>
+              <el-card>
+                <h4>Huaqiao Eligibility</h4>
+                <p>{{ statusLabel[portrait?.identity?.huaqiao?.status] || '尚未判定' }}</p>
+                <p v-if="portrait?.identity?.huaqiao?.prompt" class="muted">{{ portrait.identity.huaqiao.prompt }}</p>
+                <el-button type="primary" @click="goJudge('huaqiao')">前往华侨生判定</el-button>
+              </el-card>
+            </div>
+            <h4>目标画像</h4>
+            <p>冲刺 {{ targetCounts.reach||0 }} · 主申 {{ targetCounts.target||0 }} · 稳妥 {{ targetCounts.match||0 }} · 保底 {{ targetCounts.safety||0 }}</p>
+            <p class="muted">结构提示：{{ (portrait?.targets?.structure_flags||[]).join('、') || '无' }}</p>
+            <h4>申请准备度 {{ readinessScore }}%</h4>
+            <ul>
+              <li v-for="(v,k) in (portrait?.application_readiness?.components||{})" :key="k">{{ k }}：{{ v }}%</li>
+            </ul>
+            <p class="muted">缺失项：{{ (portrait?.application_readiness?.missing||[]).join('、') || '无' }}</p>
+            <h4>风险与下一步</h4>
+            <ul><li v-for="r in (portrait?.risk_flags||[])" :key="'r'+r">{{ r }}</li></ul>
+            <ul>
+              <li v-for="a in (portrait?.next_actions||[])" :key="a.code"><el-button link type="primary" @click="runAction(a)">{{ a.label }}</el-button></li>
+            </ul>
+            <p>未来30天 {{ timelineSummary.next_30_count||0 }} 项 · 未来90天 {{ timelineSummary.next_90_count||0 }} 项 · 逾期 {{ timelineSummary.overdue_count||0 }} 项
+              <el-button link type="primary" @click="goSection('my_timeline')">打开时间轴</el-button>
+            </p>
+          </section>
+
+          <section v-show="section==='my_timeline'" class="smp-card">
+            <div class="smp-save" style="margin-top:0">
+              <h3 style="margin:0;flex:1">我的升学时间轴</h3>
+              <el-button type="primary" :loading="timelineBusy" @click="regenerateTimeline">重新生成</el-button>
+              <el-button @click="showManual=true">+ 自定义事项</el-button>
+            </div>
+            <p class="muted">公共招生时间线只读匹配；完成状态/备注/手工事项保存在学生个人时间轴。</p>
+            <div v-for="group in timelineGroupsUI" :key="group.key" class="smp-priority">
+              <h4>{{ group.label }}（{{ (timelineGroups[group.key]||[]).length }}）</h4>
+              <article v-for="it in (timelineGroups[group.key]||[])" :key="it.id" class="smp-item">
+                <header>
+                  <strong>{{ it.title }}</strong>
+                  <el-tag size="small">{{ timelineStatusLabel[it.status] || it.status }}</el-tag>
+                </header>
+                <p>{{ it.deadline || it.start_date || '日期待确认' }} · {{ it.university_name || '—' }} · {{ it.application_route || '路线待确认' }}</p>
+                <p v-if="it.has_precise_deadline && it.days_until_deadline!=null" class="muted">距离 Deadline {{ it.days_until_deadline }} 天</p>
+                <p v-else class="muted">无精确截止日期，不显示倒计时</p>
+                <p v-if="it.needs_confirmation" class="muted">需确认：字段匹配不完全，请人工核实官方简章</p>
+                <p v-if="it.student_note">备注：{{ it.student_note }}</p>
+                <div class="smp-save">
+                  <el-button size="small" @click="patchItem(it,'IN_PROGRESS')">开始</el-button>
+                  <el-button size="small" type="success" @click="patchItem(it,'COMPLETED')">完成</el-button>
+                  <el-button size="small" @click="patchItem(it,'NOT_STARTED')">恢复</el-button>
+                  <el-button size="small" @click="patchItem(it,'NOT_APPLICABLE')">标记不适用</el-button>
+                  <el-button size="small" @click="editNote(it)">添加备注</el-button>
+                </div>
+              </article>
+              <p v-if="!(timelineGroups[group.key]||[]).length" class="muted">暂无</p>
+            </div>
+            <el-dialog v-model="showManual" title="添加自定义事项" width="480px">
+              <el-form label-width="90px">
+                <el-form-item label="标题"><el-input v-model="manualForm.title" /></el-form-item>
+                <el-form-item label="截止日期"><el-input v-model="manualForm.deadline" placeholder="YYYY-MM-DD" /></el-form-item>
+                <el-form-item label="学校"><el-input v-model="manualForm.university_name" /></el-form-item>
+                <el-form-item label="备注"><el-input v-model="manualForm.student_note" type="textarea" /></el-form-item>
+              </el-form>
+              <template #footer>
+                <el-button @click="showManual=false">取消</el-button>
+                <el-button type="primary" @click="createManual">保存</el-button>
+              </template>
+            </el-dialog>
           </section>
         </div>
       </div>
@@ -280,11 +418,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from './api'
-import { CURRICULUMS, GRADE_TYPES, LANGUAGE_EXAMS, OTHER_EXAM_TYPES, PRIORITY_LEVELS, SCHOOL_TYPES, SECTIONS, STATUS_LABEL, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
+import { CURRICULUMS, GRADE_TYPES, LANGUAGE_EXAMS, OTHER_EXAM_TYPES, PRIORITY_LEVELS, SCHOOL_TYPES, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
 const emit = defineEmits(['goto-judge'])
 
 const sections = SECTIONS
+const wizardSections = WIZARD_SECTIONS
 const schoolTypes = SCHOOL_TYPES
 const curriculums = CURRICULUMS
 const gradeTypes = GRADE_TYPES
@@ -292,19 +431,36 @@ const languageExams = LANGUAGE_EXAMS
 const otherExams = OTHER_EXAM_TYPES
 const priorityLevels = PRIORITY_LEVELS
 const statusLabel = STATUS_LABEL
+const timelineStatusLabel = TIMELINE_STATUS_LABEL
+const timelineGroupsUI = [
+  { key: 'overdue', label: '已逾期' },
+  { key: 'next_30', label: '未来30天' },
+  { key: 'next_90', label: '未来90天' },
+  { key: 'later', label: '以后' },
+  { key: 'completed', label: '已完成' },
+]
 
 const students = ref([])
 const studentId = ref(null)
 const profile = ref(null)
-const section = ref('basic_info')
+const portrait = ref(null)
+const dashboard = ref(null)
+const section = ref('summary')
 const saving = ref(false)
 const completeness = ref({ percent: 0, missing: [] })
 const universityOptions = ref([])
 const timeline = ref([])
+const timelineGroups = ref({ overdue: [], next_30: [], next_90: [], later: [], completed: [] })
+const timelineSummary = ref({ overdue_count: 0, next_30_count: 0, next_90_count: 0, next_30: [], next_90: [] })
+const timelineBusy = ref(false)
+const showManual = ref(false)
+const manualForm = ref({ title: '', deadline: '', university_name: '', student_note: '' })
 
 const wizardMode = computed(() => profile.value && !profile.value.wizard_completed)
-const wizardIndex = computed(() => Math.max(0, sections.findIndex(s => s.key === section.value)))
+const wizardIndex = computed(() => Math.max(0, wizardSections.findIndex(s => s.key === section.value)))
 const saveLabel = computed(() => wizardMode.value ? '保存并继续' : '保存修改')
+const readinessScore = computed(() => portrait.value?.application_readiness?.score ?? dashboard.value?.application_readiness?.score ?? 0)
+const targetCounts = computed(() => portrait.value?.targets?.counts || dashboard.value?.targets || { reach: 0, target: 0, match: 0, safety: 0 })
 const currentSchool = computed(() => {
   const list = profile.value?.education?.history || []
   return list.find(s => s.is_current) || list[0]
@@ -326,6 +482,12 @@ function priorityLabel(v) {
 }
 function gradesFor(courseId) {
   return (profile.value?.courses?.grades || []).filter(g => g.course_id === courseId)
+}
+function goSection(key) {
+  section.value = key
+  if (key === 'portrait') refreshPortrait()
+  if (key === 'my_timeline') loadMyTimeline()
+  if (key === 'summary' && studentId.value) openStudent(studentId.value)
 }
 
 async function loadList() {
@@ -352,21 +514,23 @@ async function openStudent(id) {
 function applyPayload(r) {
   profile.value = r.profile
   completeness.value = r.completeness || { percent: 0, missing: [] }
-  if (profile.value?.wizard_completed) {
-    /* stay on current section */
-  }
+  portrait.value = r.portrait || null
+  dashboard.value = r.dashboard || null
+  if (r.dashboard?.timeline_summary) timelineSummary.value = r.dashboard.timeline_summary
+  else if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
 }
 
 async function saveSection(key) {
   if (!studentId.value || !profile.value) return
+  if (key === 'portrait' || key === 'my_timeline') return
   saving.value = true
   try {
     const r = await api.patchStudentSection(studentId.value, key, profile.value[key])
     applyPayload(r)
     ElMessage.success('已保存')
     if (wizardMode.value) {
-      const idx = sections.findIndex(s => s.key === key)
-      if (idx >= 0 && idx < sections.length - 1) section.value = sections[idx + 1].key
+      const idx = wizardSections.findIndex(s => s.key === key)
+      if (idx >= 0 && idx < wizardSections.length - 1) section.value = wizardSections[idx + 1].key
       if (key === 'summary') {
         await api.completeStudentWizard(studentId.value)
         await openStudent(studentId.value)
@@ -441,6 +605,94 @@ async function loadTimeline() {
   } catch (e) {
     ElMessage.error(e.message || '读取时间线失败')
   }
+}
+async function refreshPortrait() {
+  if (!studentId.value) return
+  try {
+    const r = await api.studentPortrait(studentId.value)
+    portrait.value = r.portrait
+    if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
+  } catch (e) {
+    ElMessage.error(e.message || '刷新画像失败')
+  }
+}
+async function loadMyTimeline() {
+  if (!studentId.value) return
+  try {
+    const r = await api.studentTimelineItems(studentId.value)
+    timelineGroups.value = r.groups || timelineGroups.value
+    timelineSummary.value = r.summary || timelineSummary.value
+  } catch (e) {
+    ElMessage.error(e.message || '加载时间轴失败')
+  }
+}
+async function regenerateTimeline() {
+  if (!studentId.value) return
+  timelineBusy.value = true
+  try {
+    const r = await api.regenerateStudentTimeline(studentId.value)
+    timelineGroups.value = r.groups || {}
+    timelineSummary.value = r.summary || timelineSummary.value
+    if (r.portrait) portrait.value = r.portrait
+    ElMessage.success('已重新生成个人时间轴（保留完成状态/备注/手工事项）')
+  } catch (e) {
+    ElMessage.error(e.message || '生成失败')
+  } finally {
+    timelineBusy.value = false
+  }
+}
+async function patchItem(it, status) {
+  try {
+    await api.patchTimelineItem(studentId.value, it.id, { status })
+    await loadMyTimeline()
+    await refreshPortrait()
+  } catch (e) {
+    ElMessage.error(e.message || '更新失败')
+  }
+}
+async function editNote(it) {
+  const note = window.prompt('学生备注', it.student_note || '')
+  if (note === null) return
+  try {
+    await api.patchTimelineItem(studentId.value, it.id, { student_note: note })
+    await loadMyTimeline()
+  } catch (e) {
+    ElMessage.error(e.message || '备注失败')
+  }
+}
+async function createManual() {
+  if (!manualForm.value.title.trim()) {
+    ElMessage.warning('请填写标题')
+    return
+  }
+  try {
+    await api.createManualTimeline(studentId.value, { ...manualForm.value })
+    showManual.value = false
+    manualForm.value = { title: '', deadline: '', university_name: '', student_note: '' }
+    await loadMyTimeline()
+    ElMessage.success('已添加自定义事项')
+  } catch (e) {
+    ElMessage.error(e.message || '添加失败')
+  }
+}
+function runAction(a) {
+  const map = {
+    ASSESS_INTERNATIONAL: () => goJudge('international'),
+    ASSESS_HUAQIAO: () => goJudge('huaqiao'),
+    ADD_PREDICTED: () => { section.value = 'courses' },
+    ADD_LANGUAGE: () => { section.value = 'courses' },
+    ADD_SAFETY: () => { section.value = 'goals' },
+    ADD_ENTRY_YEAR: () => { section.value = 'basic_info' },
+    ADD_TARGETS: () => { section.value = 'goals' },
+    OPEN_TIMELINE_OVERDUE: () => goSection('my_timeline'),
+    OPEN_TIMELINE_30: () => goSection('my_timeline'),
+    OPEN_TIMELINE_90: () => goSection('my_timeline'),
+    GENERATE_TIMELINE: () => { goSection('my_timeline'); regenerateTimeline() },
+  }
+  const fn = map[a.code]
+  if (fn) fn()
+  else if (a.section === 'timeline') goSection('my_timeline')
+  else if (a.section) section.value = a.section
 }
 
 onMounted(async () => {

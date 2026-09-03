@@ -16,7 +16,7 @@ def setup_database():
     from app.models import Tenant, User, AuthToken, MembershipPlan, Order, PaymentOrder  # noqa
     from app.models import RechargeCode, PermissionConfig, EligibilityRecord, University  # noqa
     from app.models import AdmissionSchedule, CustomerVault, ExpertConsultation  # noqa
-    from app.models import ConsultationReportVersion, MemberTimelineReminder, StudentMasterProfile  # noqa
+    from app.models import ConsultationReportVersion, MemberTimelineReminder, StudentMasterProfile, StudentTimelineItem  # noqa
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)

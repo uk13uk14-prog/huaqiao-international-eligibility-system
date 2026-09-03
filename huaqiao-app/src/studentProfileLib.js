@@ -10,6 +10,17 @@ export const PRIORITY_LEVELS = [
   { value: 'safety', label: '保底' },
 ]
 export const SECTIONS = [
+  { key: 'summary', label: '档案总览' },
+  { key: 'basic_info', label: '基本信息' },
+  { key: 'education', label: '教育与学校' },
+  { key: 'courses', label: '课程与成绩' },
+  { key: 'goals', label: '升学目标' },
+  { key: 'identity', label: '身份与国籍' },
+  { key: 'portrait', label: '学生画像' },
+  { key: 'my_timeline', label: '升学时间轴' },
+  { key: 'planning', label: '申请与规划' },
+]
+export const WIZARD_SECTIONS = [
   { key: 'basic_info', label: '基本信息' },
   { key: 'education', label: '教育与学校' },
   { key: 'courses', label: '课程与成绩' },
@@ -18,6 +29,7 @@ export const SECTIONS = [
   { key: 'planning', label: '申请与规划' },
   { key: 'summary', label: '档案总览' },
 ]
+export const DERIVED_SECTIONS = new Set(['portrait', 'my_timeline'])
 export const STATUS_LABEL = {
   NOT_ASSESSED: '尚未判定',
   IN_PROGRESS: '判定进行中',
@@ -25,6 +37,13 @@ export const STATUS_LABEL = {
   LIKELY_ELIGIBLE: '初步符合',
   NOT_ELIGIBLE: '初步不符合',
   NEED_MORE_INFO: '需补充材料',
+}
+export const TIMELINE_STATUS_LABEL = {
+  NOT_STARTED: '未开始',
+  IN_PROGRESS: '进行中',
+  COMPLETED: '已完成',
+  OVERDUE: '已逾期',
+  NOT_APPLICABLE: '不适用',
 }
 
 export function nid() {

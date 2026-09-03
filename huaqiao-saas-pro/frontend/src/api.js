@@ -21,5 +21,10 @@ export const api = {
   completeStudentWizard: id => request(`/api/students/${id}/complete-wizard`, { method: 'POST', body: '{}' }),
   studentWriteback: (id, data) => request(`/api/students/${id}/eligibility/writeback`, { method: 'POST', body: JSON.stringify(data) }),
   studentTimeline: id => request(`/api/students/${id}/timeline-matches`),
+  studentPortrait: id => request(`/api/students/${id}/portrait`),
+  studentTimelineItems: id => request(`/api/students/${id}/timeline`),
+  regenerateStudentTimeline: id => request(`/api/students/${id}/timeline/regenerate`, { method: 'POST', body: '{}' }),
+  createManualTimeline: (id, data) => request(`/api/students/${id}/timeline/manual`, { method: 'POST', body: JSON.stringify(data) }),
+  patchTimelineItem: (id, itemId, data) => request(`/api/students/${id}/timeline/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminUsers: () => request('/api/admin/users'), adminStats: () => request('/api/admin/stats'), adminPlans: () => request('/api/admin/plans'), updatePlan: (code, data) => request(`/api/admin/plans/${code}`, { method: 'PATCH', body: JSON.stringify(data) }), adminCodes: () => request('/api/admin/recharge-codes'), createCodes: data => request('/api/admin/recharge-codes', { method: 'POST', body: JSON.stringify(data) })
 }

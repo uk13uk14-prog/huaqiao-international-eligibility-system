@@ -153,36 +153,118 @@
       </div>
 
       <div v-show="section==='summary'" class="form-card">
-        <div class="hero-card"><h1>档案完整度 {{ completeness.percent || 0 }}%</h1><p class="hero-lead">缺失只提示，不强制一次填完</p></div>
-        <van-cell v-for="m in completeness.missing || []" :key="m" :title="m" />
-        <van-cell title="姓名" :value="(profile.basic_info.chinese_name||'')+' '+(profile.basic_info.english_name||'')" />
-        <van-cell title="当前学校" :value="currentSchool?.school_name || '—'" />
-        <van-cell title="课程体系" :value="(profile.courses.curricula||[]).join('/') || '—'" />
+        <div class="hero-card">
+          <h1>申请准备度 {{ readinessScore }}%</h1>
+          <p class="hero-lead">档案完整度 {{ completeness.percent || 0 }}% · 非录取概率</p>
+        </div>
+        <van-cell title="姓名" :value="(portrait?.basic?.chinese_name || profile.basic_info.chinese_name || '') + ' ' + (portrait?.basic?.english_name || '')" is-link @click="section='portrait'" />
+        <van-cell title="学校/年级" :label="(portrait?.basic?.current_school || currentSchool?.school_name || '—') + ' · ' + (portrait?.basic?.current_grade || '—')" />
+        <van-cell title="国际生" :value="statusLabel[portrait?.identity?.international?.status || profile.identity.international.status]" />
+        <van-cell title="华侨生" :value="statusLabel[portrait?.identity?.huaqiao?.status || profile.identity.huaqiao.status]" />
+        <van-cell title="语言" :value="portrait?.language?.summary || '语言成绩缺失'" />
+        <van-cell title="目标结构" :value="`冲${targetCounts.reach||0}/主${targetCounts.target||0}/稳${targetCounts.match||0}/保${targetCounts.safety||0}`" />
+        <van-cell title="未来30天" :value="`${timelineSummary.next_30_count||0} 项`" is-link @click="goSection('my_timeline')" />
+        <van-cell title="未来90天" :value="`${timelineSummary.next_90_count||0} 项`" is-link @click="goSection('my_timeline')" />
+        <van-cell title="逾期" :value="`${timelineSummary.overdue_count||0} 项`" is-link @click="goSection('my_timeline')" />
+        <van-cell v-for="r in (portrait?.risk_flags||[]).slice(0,4)" :key="r" :title="r" />
+        <van-cell v-for="a in (portrait?.next_actions||[]).slice(0,5)" :key="a.code" :title="a.label" is-link @click="runAction(a)" />
         <van-field v-model="profile.summary.summary_notes" label="备注" type="textarea" rows="2" autosize />
         <div class="flow-actions"><van-button type="primary" block round :loading="saving" @click="save('summary')">{{ saveLabel }}</van-button></div>
+      </div>
+
+      <div v-show="section==='portrait'" class="form-card">
+        <div class="consult-actions" style="padding:8px 12px;"><van-button block round @click="refreshPortrait">刷新画像</van-button></div>
+        <p class="confirm-hint">自动从档案生成 · v{{ portrait?.portrait_version || '—' }}</p>
+        <van-cell title="年龄" :value="portrait?.basic?.age ?? '—'" />
+        <van-cell title="国家" :value="portrait?.basic?.current_country || '—'" />
+        <van-cell title="课程体系" :value="(portrait?.basic?.curricula||[]).join('/') || '—'" />
+        <van-cell title="学术优势" :label="(portrait?.academic?.academic_strengths||[]).join('；') || '暂无'" />
+        <van-cell title="需关注" :label="(portrait?.academic?.academic_weaknesses||[]).join('；') || '暂无'" />
+        <van-cell v-for="ex in (portrait?.language?.exams||[])" :key="ex.exam_type+ex.exam_date" :title="ex.exam_type" :value="`${ex.overall_score||'—'} · ${ex.status}`" />
+        <div class="summary-card">
+          <h3>国际生资格</h3>
+          <p>{{ statusLabel[portrait?.identity?.international?.status] || '尚未判定' }}</p>
+          <p class="muted" v-if="portrait?.identity?.international?.prompt">{{ portrait.identity.international.prompt }}</p>
+          <van-button block type="primary" @click="goJudge('international')">前往国际生判定</van-button>
+        </div>
+        <div class="summary-card">
+          <h3>华侨生资格</h3>
+          <p>{{ statusLabel[portrait?.identity?.huaqiao?.status] || '尚未判定' }}</p>
+          <p class="muted" v-if="portrait?.identity?.huaqiao?.prompt">{{ portrait.identity.huaqiao.prompt }}</p>
+          <van-button block type="primary" @click="goJudge('huaqiao')">前往华侨生判定</van-button>
+        </div>
+        <van-cell title="申请准备度" :value="`${readinessScore}%`" />
+        <van-cell v-for="(v,k) in (portrait?.application_readiness?.components||{})" :key="k" :title="k" :value="`${v}%`" />
+        <van-cell title="时间轴" :value="`30天${timelineSummary.next_30_count||0} / 90天${timelineSummary.next_90_count||0} / 逾期${timelineSummary.overdue_count||0}`" is-link @click="goSection('my_timeline')" />
+      </div>
+
+      <div v-show="section==='my_timeline'" class="form-card">
+        <div class="consult-actions" style="padding:8px 12px;display:flex;flex-direction:column;gap:8px;">
+          <van-button block round type="primary" :loading="timelineBusy" @click="regenerateTimeline">重新生成个人时间轴</van-button>
+          <van-button block round @click="showManual=true">+ 自定义事项</van-button>
+        </div>
+        <div v-for="group in timelineGroupsUI" :key="group.key">
+          <h3 style="padding:12px 16px 0;color:#123c69;">{{ group.label }}（{{ (timelineGroups[group.key]||[]).length }}）</h3>
+          <div v-for="it in (timelineGroups[group.key]||[])" :key="it.id" class="summary-card">
+            <b>{{ it.title }}</b>
+            <p>{{ it.deadline || it.start_date || '日期待确认' }} · {{ timelineStatusLabel[it.status] || it.status }}</p>
+            <p class="muted">{{ it.university_name || '—' }} · {{ it.application_route || '路线待确认' }}</p>
+            <p v-if="it.has_precise_deadline && it.days_until_deadline!=null" class="muted">距离 Deadline {{ it.days_until_deadline }} 天</p>
+            <p v-else class="muted">无精确截止日期</p>
+            <p v-if="it.student_note">备注：{{ it.student_note }}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+              <van-button size="small" @click="patchItem(it,'IN_PROGRESS')">开始</van-button>
+              <van-button size="small" type="primary" @click="patchItem(it,'COMPLETED')">完成</van-button>
+              <van-button size="small" @click="patchItem(it,'NOT_STARTED')">恢复</van-button>
+              <van-button size="small" @click="patchItem(it,'NOT_APPLICABLE')">不适用</van-button>
+              <van-button size="small" @click="editNote(it)">备注</van-button>
+            </div>
+          </div>
+        </div>
+        <van-dialog v-model:show="showManual" title="自定义事项" show-cancel-button @confirm="createManual">
+          <van-field v-model="manualForm.title" label="标题" />
+          <van-field v-model="manualForm.deadline" label="截止" placeholder="YYYY-MM-DD" />
+          <van-field v-model="manualForm.university_name" label="学校" />
+          <van-field v-model="manualForm.student_note" label="备注" type="textarea" rows="2" />
+        </van-dialog>
       </div>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
 import { getSaasToken, saasApi } from './saasApi'
-import { PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
+import { PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
 const emit = defineEmits(['goto-judge'])
 const sections = SECTIONS
+const wizardSections = WIZARD_SECTIONS
 const priorityLevels = PRIORITY_LEVELS
 const statusLabel = STATUS_LABEL
+const timelineStatusLabel = TIMELINE_STATUS_LABEL
+const timelineGroupsUI = [
+  { key: 'overdue', label: '已逾期' },
+  { key: 'next_30', label: '未来30天' },
+  { key: 'next_90', label: '未来90天' },
+  { key: 'later', label: '以后' },
+  { key: 'completed', label: '已完成' },
+]
 const students = ref([])
 const studentId = ref(null)
 const profile = ref(null)
-const section = ref('basic_info')
+const portrait = ref(null)
+const section = ref('summary')
 const saving = ref(false)
 const completeness = ref({ percent: 0, missing: [] })
 const showPicker = ref(false)
 const timeline = ref([])
+const timelineGroups = ref({ overdue: [], next_30: [], next_90: [], later: [], completed: [] })
+const timelineSummary = ref({ overdue_count: 0, next_30_count: 0, next_90_count: 0, next_30: [], next_90: [] })
+const timelineBusy = ref(false)
+const showManual = ref(false)
+const manualForm = ref({ title: '', deadline: '', university_name: '', student_note: '' })
 const curriculaText = ref('')
 
 const wizardMode = computed(() => profile.value && !profile.value.wizard_completed)
@@ -193,6 +275,8 @@ const currentSchool = computed(() => {
   const list = profile.value?.education?.history || []
   return list.find(s => s.is_current) || list[0]
 })
+const readinessScore = computed(() => portrait.value?.application_readiness?.score ?? 0)
+const targetCounts = computed(() => portrait.value?.targets?.counts || { reach: 0, target: 0, match: 0, safety: 0 })
 
 function targetsBy(level) { return (profile.value?.goals?.targets || []).filter(t => t.priority_level === level) }
 function countPri(level) { return targetsBy(level).length }
@@ -214,8 +298,17 @@ function addMathBundle() {
 function apply(r) {
   profile.value = r.profile
   completeness.value = r.completeness || { percent: 0, missing: [] }
+  portrait.value = r.portrait || null
+  if (r.dashboard?.timeline_summary) timelineSummary.value = r.dashboard.timeline_summary
+  else if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
   curriculaText.value = (profile.value.courses.curricula || []).join(',')
   studentId.value = r.id
+}
+
+function goSection(key) {
+  section.value = key
+  if (key === 'portrait') refreshPortrait()
+  if (key === 'my_timeline') loadMyTimeline()
 }
 
 async function loadList() {
@@ -251,6 +344,7 @@ function onPickStudent({ selectedOptions }) {
 }
 async function save(key) {
   if (!studentId.value) return
+  if (key === 'portrait' || key === 'my_timeline') return
   if (key === 'courses') syncCurricula()
   saving.value = true
   try {
@@ -258,8 +352,8 @@ async function save(key) {
     apply(r)
     showSuccessToast('已保存')
     if (wizardMode.value) {
-      const idx = sections.findIndex(s => s.key === key)
-      if (idx >= 0 && idx < sections.length - 1) section.value = sections[idx + 1].key
+      const idx = wizardSections.findIndex(s => s.key === key)
+      if (idx >= 0 && idx < wizardSections.length - 1) section.value = wizardSections[idx + 1].key
       if (key === 'summary') await saasApi.completeStudentWizard(studentId.value)
     }
     await loadList()
@@ -291,6 +385,85 @@ async function loadTimeline() {
   const r = await saasApi.studentTimeline(studentId.value)
   timeline.value = r.matches || []
 }
+async function refreshPortrait() {
+  if (!studentId.value) return
+  try {
+    const r = await saasApi.studentPortrait(studentId.value)
+    portrait.value = r.portrait
+    if (r.portrait?.timeline_summary) timelineSummary.value = r.portrait.timeline_summary
+  } catch (e) { showFailToast(e.message || '刷新失败') }
+}
+async function loadMyTimeline() {
+  if (!studentId.value) return
+  try {
+    const r = await saasApi.studentTimelineItems(studentId.value)
+    timelineGroups.value = r.groups || timelineGroups.value
+    timelineSummary.value = r.summary || timelineSummary.value
+  } catch (e) { showFailToast(e.message || '加载时间轴失败') }
+}
+async function regenerateTimeline() {
+  if (!studentId.value) return
+  timelineBusy.value = true
+  try {
+    const r = await saasApi.regenerateStudentTimeline(studentId.value)
+    timelineGroups.value = r.groups || {}
+    timelineSummary.value = r.summary || timelineSummary.value
+    if (r.portrait) portrait.value = r.portrait
+    showSuccessToast('已重新生成')
+  } catch (e) { showFailToast(e.message || '生成失败') }
+  finally { timelineBusy.value = false }
+}
+async function patchItem(it, status) {
+  try {
+    await saasApi.patchTimelineItem(studentId.value, it.id, { status })
+    await loadMyTimeline()
+    await refreshPortrait()
+  } catch (e) { showFailToast(e.message || '更新失败') }
+}
+async function editNote(it) {
+  const note = window.prompt('学生备注', it.student_note || '')
+  if (note === null) return
+  try {
+    await saasApi.patchTimelineItem(studentId.value, it.id, { student_note: note })
+    await loadMyTimeline()
+  } catch (e) { showFailToast(e.message || '备注失败') }
+}
+async function createManual() {
+  if (!manualForm.value.title.trim()) {
+    showFailToast('请填写标题')
+    return
+  }
+  try {
+    await saasApi.createManualTimeline(studentId.value, { ...manualForm.value })
+    showManual.value = false
+    manualForm.value = { title: '', deadline: '', university_name: '', student_note: '' }
+    await loadMyTimeline()
+    showSuccessToast('已添加')
+  } catch (e) { showFailToast(e.message || '添加失败') }
+}
+function runAction(a) {
+  const map = {
+    ASSESS_INTERNATIONAL: () => goJudge('international'),
+    ASSESS_HUAQIAO: () => goJudge('huaqiao'),
+    ADD_PREDICTED: () => { section.value = 'courses' },
+    ADD_LANGUAGE: () => { section.value = 'courses' },
+    ADD_SAFETY: () => { section.value = 'goals' },
+    ADD_ENTRY_YEAR: () => { section.value = 'basic_info' },
+    ADD_TARGETS: () => { section.value = 'goals' },
+    OPEN_TIMELINE_OVERDUE: () => goSection('my_timeline'),
+    OPEN_TIMELINE_30: () => goSection('my_timeline'),
+    OPEN_TIMELINE_90: () => goSection('my_timeline'),
+    GENERATE_TIMELINE: () => { goSection('my_timeline'); regenerateTimeline() },
+  }
+  const fn = map[a.code]
+  if (fn) fn()
+  else if (a.section === 'timeline') goSection('my_timeline')
+  else if (a.section) section.value = a.section
+}
+watch(section, (key) => {
+  if (key === 'portrait') refreshPortrait()
+  if (key === 'my_timeline') loadMyTimeline()
+})
 onMounted(loadList)
 defineExpose({ loadList })
 </script>

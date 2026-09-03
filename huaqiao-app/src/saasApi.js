@@ -74,6 +74,12 @@ export const saasApi = {
   studentWriteback: (id, data) =>
     saasRequest(`/api/students/${id}/eligibility/writeback`, { method: 'POST', body: JSON.stringify(data) }),
   studentTimeline: (id) => saasRequest(`/api/students/${id}/timeline-matches`),
+  studentPortrait: (id) => saasRequest(`/api/students/${id}/portrait`),
+  studentTimelineItems: (id) => saasRequest(`/api/students/${id}/timeline`),
+  regenerateStudentTimeline: (id) => saasRequest(`/api/students/${id}/timeline/regenerate`, { method: 'POST', body: '{}' }),
+  createManualTimeline: (id, data) => saasRequest(`/api/students/${id}/timeline/manual`, { method: 'POST', body: JSON.stringify(data) }),
+  patchTimelineItem: (id, itemId, data) =>
+    saasRequest(`/api/students/${id}/timeline/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   expertCreate: (data) => saasRequest('/api/expert/consultations', { method: 'POST', body: JSON.stringify(data) }),
 

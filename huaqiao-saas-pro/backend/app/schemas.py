@@ -84,6 +84,28 @@ class StudentEligibilityWriteback(BaseModel):
     confirm: bool = False
 
 
+class StudentTimelineManualCreate(BaseModel):
+    title: str = Field(..., min_length=1)
+    description: str = ""
+    start_date: str = ""
+    deadline: str = ""
+    university_name: str = ""
+    entry_year: int | None = None
+    application_route: str = ""
+    student_note: str = ""
+
+
+class StudentTimelinePatch(BaseModel):
+    status: str | None = None
+    student_note: str | None = None
+    title: str | None = None
+    description: str | None = None
+    deadline: str | None = None
+    start_date: str | None = None
+    university_name: str | None = None
+    application_route: str | None = None
+
+
 class ExpertConsultationCreate(BaseModel):
     title: str = ""
     question: str = Field(..., min_length=4)

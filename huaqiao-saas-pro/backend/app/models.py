@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -168,6 +168,31 @@ class StudentMasterProfile(Base):
     cipher_blob = Column(Text, default="")
     schema_version = Column(Integer, default=2)
     source = Column(String(40), default="created")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StudentTimelineItem(Base):
+    """Per-student personalized timeline state. Public AdmissionSchedule is never mutated."""
+    __tablename__ = "student_timeline_items"
+    id = Column(Integer, primary_key=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
+    source_timeline_id = Column(Integer, ForeignKey("admission_schedules.id"), nullable=True, index=True)
+    title = Column(String(240), default="")
+    description = Column(Text, default="")
+    start_date = Column(Date, nullable=True)
+    deadline = Column(Date, nullable=True, index=True)
+    university_id = Column(Integer, ForeignKey("universities.id"), nullable=True)
+    university_name = Column(String(160), default="")
+    entry_year = Column(Integer, nullable=True)
+    application_route = Column(String(40), default="")
+    status = Column(String(30), default="NOT_STARTED", index=True)
+    completed_at = Column(DateTime, nullable=True)
+    student_note = Column(Text, default="")
+    is_manual = Column(Boolean, default=False, index=True)
+    needs_confirmation = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
