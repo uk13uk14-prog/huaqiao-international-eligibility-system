@@ -19,22 +19,24 @@
           <h1>国际生/华侨生资格判定系统</h1>
           <p class="hero-lead">欢迎使用</p>
         </div>
-        <van-cell-group v-if="accessibleStudents.length" inset class="home-student-switch">
-          <van-cell title="当前学生" :value="activeStudentLabel" />
+        <van-cell-group v-if="studentSwitcherList.length" inset class="home-student-switch">
+          <van-cell title="当前学生" :value="currentStudentLabel" />
           <van-field
-            v-if="hasMultipleStudents"
+            v-if="studentSwitcherList.length > 1"
             label="切换"
             is-link
             readonly
-            :model-value="activeStudentLabel"
+            :model-value="currentStudentLabel"
             placeholder="选择学生"
-            @click="showHomeStudentPicker = true"
+            @click="openHomeStudentPicker"
           />
         </van-cell-group>
-        <van-popup v-model:show="showHomeStudentPicker" position="bottom">
+        <van-popup v-model:show="showHomeStudentPicker" position="bottom" round>
           <van-picker
+            v-if="showHomeStudentPicker"
+            :key="`home-picker-${currentStudentId || 'none'}-${pickerEpoch}`"
             :columns="homeStudentColumns"
-            :default-index="homePickerDefaultIndex"
+            :model-value="homePickerSelectedValues"
             @confirm="onHomePickStudent"
             @cancel="showHomeStudentPicker=false"
           />
@@ -386,9 +388,9 @@ import {
   activeStudentId,
   activeStudentLabel,
   clearActiveStudent,
-  hasMultipleStudents,
   normalizeStudentId,
   setActiveStudentId,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import { api } from './api'
@@ -460,13 +462,17 @@ const expertDetailLoading = ref(false)
 const reminderList = ref([])
 const profileStudentId = activeStudentId
 const showHomeStudentPicker = ref(false)
-const homeStudentColumns = computed(() => accessibleStudents.value.map(s => ({
+const pickerEpoch = ref(0)
+const studentSwitcherList = computed(() => accessibleStudents.value.slice())
+const currentStudentId = computed(() => normalizeStudentId(activeStudentId.value))
+const currentStudentLabel = computed(() => activeStudentLabel.value)
+const homeStudentColumns = computed(() => studentSwitcherList.value.map(s => ({
   text: s.display_name || `学生 #${s.id}`,
   value: normalizeStudentId(s.id),
 })))
-const homePickerDefaultIndex = computed(() => {
-  const idx = accessibleStudents.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
-  return idx >= 0 ? idx : 0
+const homePickerSelectedValues = computed(() => {
+  const id = currentStudentId.value
+  return id != null ? [id] : []
 })
 
 async function refreshStudentSwitcher() {
@@ -476,11 +482,47 @@ async function refreshStudentSwitcher() {
     syncStudentsAndActive(r.students || [])
   } catch { /* ignore */ }
 }
+function openHomeStudentPicker() {
+  pickerEpoch.value += 1
+  showHomeStudentPicker.value = true
+}
+function extractPickerStudentId(payload) {
+  if (payload == null) return null
+  // Vant 4 object payload
+  const fromOpt = payload?.selectedOptions?.[0]
+  if (fromOpt && typeof fromOpt === 'object') {
+    const id = normalizeStudentId(fromOpt.value ?? fromOpt.id)
+    if (id != null) return id
+  }
+  const fromValues = payload?.selectedValues?.[0]
+  const fromValuesId = normalizeStudentId(fromValues)
+  if (fromValuesId != null) return fromValuesId
+  // Legacy: confirm may pass array of values / options directly
+  if (Array.isArray(payload)) {
+    const first = payload[0]
+    if (first && typeof first === 'object') {
+      return normalizeStudentId(first.value ?? first.id)
+    }
+    return normalizeStudentId(first)
+  }
+  return normalizeStudentId(payload)
+}
 function onHomePickStudent(payload) {
   showHomeStudentPicker.value = false
-  const opt = payload?.selectedOptions?.[0]
-  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
-  if (id) setActiveStudentId(id)
+  const id = extractPickerStudentId(payload)
+  if (id == null) {
+    showFailToast('请选择有效学生档案')
+    return
+  }
+  if (id === currentStudentId.value) return
+  const beforeCount = accessibleStudents.value.length
+  if (!switchActiveStudent(id)) {
+    showFailToast('无法切换到该学生')
+    return
+  }
+  if (accessibleStudents.value.length !== beforeCount) {
+    refreshStudentSwitcher()
+  }
 }
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']

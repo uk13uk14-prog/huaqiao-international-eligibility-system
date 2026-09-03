@@ -49,20 +49,29 @@
       <header class="topbar">
         <div><h1>{{ text.systemName }}</h1><p>{{ user.email }} · {{ planText }}</p></div>
         <div class="top-actions">
-          <div v-if="accessibleStudents.length" class="student-switcher" data-testid="home-student-switcher">
+          <div v-if="studentSwitcherList.length" class="student-switcher" data-testid="home-student-switcher">
             <span class="student-switcher-label">当前学生</span>
-            <strong class="student-switcher-name">{{ activeStudentLabel }}</strong>
-            <el-dropdown v-if="hasMultipleStudents" trigger="click" @command="onHomeSwitchStudent">
+            <strong class="student-switcher-name">{{ currentStudentLabel }}</strong>
+            <el-dropdown
+              v-if="studentSwitcherList.length > 1"
+              :key="`switcher-${currentStudentId || 'none'}`"
+              trigger="click"
+              @command="onHomeSwitchStudent"
+            >
               <el-button size="small" type="primary" plain>切换</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item
-                    v-for="s in accessibleStudents"
+                    v-for="s in studentSwitcherList"
                     :key="s.id"
                     :command="normalizeStudentId(s.id)"
-                    :disabled="normalizeStudentId(s.id) === activeStudentId"
+                    :disabled="normalizeStudentId(s.id) === currentStudentId"
+                    :class="{ 'is-current-student-option': normalizeStudentId(s.id) === currentStudentId }"
                   >
-                    <span :class="{ 'is-active-student': normalizeStudentId(s.id) === activeStudentId }">{{ s.display_name }}</span>
+                    <span>
+                      {{ s.display_name || `学生 #${s.id}` }}
+                      <template v-if="normalizeStudentId(s.id) === currentStudentId">（当前）</template>
+                    </span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -188,12 +197,17 @@ import {
   activeStudentId,
   activeStudentLabel,
   clearActiveStudent,
-  hasMultipleStudents,
   normalizeStudentId,
   setActiveStudentId,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import StudentProfile from './StudentProfile.vue'
+
+/** Local computeds — reliable template reactivity for module-level refs. */
+const studentSwitcherList = computed(() => accessibleStudents.value.slice())
+const currentStudentId = computed(() => normalizeStudentId(activeStudentId.value))
+const currentStudentLabel = computed(() => activeStudentLabel.value)
 
 const user = ref(null), loading = ref(false), authTab = ref('login'), tab = ref('internationalDashboard'), unlockVisible = ref(false)
 const darkMode = ref(localStorage.getItem('saas_theme') === 'dark')
@@ -235,19 +249,32 @@ const planText = computed(() => user.value?.features?.paid ? text.value.paidPlan
 async function refreshStudentSwitcher() {
   try {
     const r = await api.students()
+    // Keep full list + resolve active id — never replace list with only current student
     syncStudentsAndActive(r.students || [])
   } catch {
     /* not logged in / no students yet */
   }
 }
 function onHomeSwitchStudent(id) {
-  const ok = setActiveStudentId(id)
+  const nid = normalizeStudentId(id)
+  if (nid == null) {
+    ElMessage.warning('无效的学生档案')
+    return
+  }
+  if (nid === currentStudentId.value) return
+  const beforeCount = accessibleStudents.value.length
+  const ok = switchActiveStudent(nid)
   if (!ok) {
     ElMessage.warning('无法切换到该学生')
     return
   }
+  // Guard: switching must never shrink the accessible list
+  if (accessibleStudents.value.length !== beforeCount) {
+    console.warn('[student-switch] accessibleStudents mutated during switch; restoring via refresh')
+    refreshStudentSwitcher()
+  }
   if (tab.value === 'studentProfile' && studentProfileRef.value?.openStudent) {
-    studentProfileRef.value.openStudent(id)
+    studentProfileRef.value.openStudent(nid)
   }
 }
 
