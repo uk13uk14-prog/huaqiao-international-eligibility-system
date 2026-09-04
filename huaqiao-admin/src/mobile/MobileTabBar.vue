@@ -24,7 +24,7 @@ const items = [
   { to: '/m/home', label: '首页', icon: '⌂', match: ['/m/home'] },
   { to: '/m/students', label: '学生', icon: '学', match: ['/m/students'] },
   { to: '/m/approval', label: '审核', icon: '审', match: ['/m/approval'] },
-  { to: '/m/ai', label: 'AI', icon: 'AI', match: ['/m/ai', '/m/published'] },
+  { to: '/m/notifications', label: '通知', icon: '铃', match: ['/m/notifications'] },
   { to: '/m/me', label: '我的', icon: '我', match: ['/m/me'] },
 ]
 

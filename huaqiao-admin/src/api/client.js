@@ -104,4 +104,19 @@ export const api = {
     request(`/api/admin/v1/students/${id}/ai-drafts/${draftId}/publish`, { method: 'POST' }),
   settings: () => request('/api/admin/v1/settings'),
   consultations: () => request('/api/admin/expert-consultations'),
+  notifications: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.unread_only) q.set('unread_only', '1')
+    if (params.pending_only) q.set('pending_only', '1')
+    if (params.priority) q.set('priority', params.priority)
+    const qs = q.toString()
+    return request(`/api/admin/v1/notifications${qs ? `?${qs}` : ''}`)
+  },
+  notificationPopups: () => request('/api/admin/v1/notifications/popups'),
+  notificationRead: (id) =>
+    request(`/api/admin/v1/notifications/${id}/read`, { method: 'POST' }),
+  notificationPopupShown: (id) =>
+    request(`/api/admin/v1/notifications/${id}/popup-shown`, { method: 'POST' }),
+  notificationSchedulerTick: () =>
+    request('/api/admin/v1/notifications/scheduler/tick', { method: 'POST' }),
 }

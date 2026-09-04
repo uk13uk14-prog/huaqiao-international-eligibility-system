@@ -9,11 +9,43 @@
       @click-left="goBack"
     >
       <template #right>
+        <button
+          v-if="tab === 'home'"
+          type="button"
+          class="notif-bell"
+          aria-label="通知中心"
+          @click="openNotifications"
+        >
+          🔔
+          <span v-if="notifUnread > 0" class="notif-badge">{{ notifUnread > 99 ? '99+' : notifUnread }}</span>
+        </button>
         <van-switch v-model="darkMode" size="22px" @change="persistTheme" />
       </template>
     </van-nav-bar>
 
     <main class="screen" @touchstart="touchStart" @touchend="touchEnd">
+      <section v-if="tab === 'notifications'" class="flow-screen notif-screen">
+        <van-tabs v-model:active="notifTab">
+          <van-tab title="重要" name="important" />
+          <van-tab title="时间线" name="timeline" />
+          <van-tab title="规划" name="expert" />
+          <van-tab title="账户" name="account" />
+        </van-tabs>
+        <div v-if="notifLoading" class="pad muted">加载中…</div>
+        <van-empty v-else-if="!filteredNotifs.length" description="暂无通知" />
+        <van-cell-group v-else inset>
+          <van-cell
+            v-for="n in filteredNotifs"
+            :key="n.id"
+            :title="n.title"
+            :label="n.body"
+            :value="n.unread ? '未读' : ''"
+            is-link
+            @click="openNotifItem(n)"
+          />
+        </van-cell-group>
+      </section>
+
       <section v-if="tab === 'home'" class="home-screen">
         <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <div class="hero-card">
@@ -443,7 +475,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { showFailToast, showLoadingToast, showSuccessToast } from 'vant'
+import { showDialog, showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
 import {
   accessibleStudents,
@@ -464,6 +496,10 @@ const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
 const tab = ref('home')
 const historyStack = ref(['home'])
 const darkMode = ref(localStorage.getItem('mobile-theme') === 'dark')
+const notifUnread = ref(0)
+const notifTab = ref('important')
+const notifLoading = ref(false)
+const notifItems = ref([])
 const eligibilityContext = ref('international')
 const judgeType = ref('international')
 const judgeStep = ref(0)
@@ -655,7 +691,7 @@ const monthOptions = [{ text: '全部月份', value: '' }, ...Array.from({ lengt
 const pendingLawScroll = ref(null)
 
 const form = ref(defaultForm('international'))
-const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案' }[tab.value]))
+const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', notifications: '通知中心' }[tab.value]))
 const judgeTypeLabel = computed(() => judgeType.value === 'huaqiao' ? '华侨生' : '国际生')
 
 watch(targetFilter, (v) => { eligibilityContext.value = v })
@@ -765,6 +801,75 @@ async function submitConsultToServer() {
 }
 
 function pushTab(name) { if (tab.value !== name) historyStack.value.push(name); tab.value = name }
+
+
+const filteredNotifs = computed(() => {
+  const list = notifItems.value || []
+  const tabName = notifTab.value
+  if (tabName === 'timeline') return list.filter((n) => (n.category || '') === 'timeline' || (n.event_type || '').includes('DEADLINE') || (n.event_type || '').includes('TIMELINE'))
+  if (tabName === 'expert') return list.filter((n) => (n.category || '') === 'expert' || (n.event_type || '').includes('EXPERT') || (n.event_type || '').includes('REPORT'))
+  if (tabName === 'account') return list.filter((n) => (n.category || '') === 'account' || (n.event_type || '').includes('TRIAL') || (n.event_type || '').includes('MEMBER'))
+  return list.filter((n) => n.priority === 'HIGH' || n.priority === 'CRITICAL' || n.unread)
+})
+
+async function refreshNotifBadge() {
+  if (!getSaasToken()) { notifUnread.value = 0; return }
+  try {
+    const data = await saasApi.notificationUnreadCount()
+    notifUnread.value = data.unread_count || 0
+  } catch { /* ignore */ }
+}
+
+async function loadNotifications() {
+  notifLoading.value = true
+  try {
+    const data = await saasApi.notifications({ unread_only: false })
+    notifItems.value = data.items || []
+    notifUnread.value = data.unread_count || 0
+  } catch {
+    notifItems.value = []
+  } finally {
+    notifLoading.value = false
+  }
+}
+
+async function openNotifications() {
+  pushTab('notifications')
+  await loadNotifications()
+  await showNotifPopupsOnce()
+}
+
+async function showNotifPopupsOnce() {
+  if (!getSaasToken()) return
+  try {
+    const data = await saasApi.notificationPopups()
+    for (const n of data.items || []) {
+      const isCrit = n.priority === 'CRITICAL'
+      await showDialog({
+        title: n.title || '重要提醒',
+        message: n.body || '',
+        confirmButtonText: isCrit ? '我已知晓' : '知道了',
+      })
+      try { await saasApi.notificationPopupShown(n.id) } catch { /* ignore */ }
+      if (isCrit) {
+        try { await saasApi.notificationRead(n.id) } catch { /* ignore */ }
+      }
+    }
+    await refreshNotifBadge()
+  } catch { /* ignore */ }
+}
+
+async function openNotifItem(n) {
+  try { if (n.unread) await saasApi.notificationRead(n.id) } catch { /* ignore */ }
+  const et = n.event_type || ''
+  if (et.includes('EXPERT') || et.includes('REPORT')) openPage('member')
+  else if (et.includes('DEADLINE') || et.includes('TIMELINE')) openPage('schedule')
+  else if (et.includes('MEMBER') || et.includes('TRIAL')) openPage('member')
+  else if (et.includes('PROFILE') || et.includes('ELIGIBILITY')) openPage('profile')
+  else openPage('home')
+  await refreshNotifBadge()
+}
+
 
 function openPage(name) {
   if (name === 'universities' || name === 'schedule') {

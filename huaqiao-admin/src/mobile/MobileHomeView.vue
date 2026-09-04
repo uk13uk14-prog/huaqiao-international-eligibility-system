@@ -8,6 +8,10 @@
     <div v-if="loading" class="gq-muted pad">加载中…</div>
     <template v-else-if="data">
       <div class="kpi-grid">
+        <button type="button" class="kpi accent" @click="$router.push('/m/notifications')">
+          <span class="k">新消息</span>
+          <strong>{{ unreadNotif ?? '—' }}</strong>
+        </button>
         <button type="button" class="kpi" @click="$router.push('/m/students')">
           <span class="k">总用户</span>
           <strong>{{ data.total_users ?? '—' }}</strong>
@@ -33,6 +37,7 @@
           <button type="button" @click="$router.push('/m/approval')">审核队列</button>
           <button type="button" @click="$router.push('/m/ai')">AI 专家</button>
           <button type="button" @click="$router.push('/m/published')">已发布</button>
+          <button type="button" @click="$router.push('/m/notifications')">通知中心</button>
         </div>
       </section>
 

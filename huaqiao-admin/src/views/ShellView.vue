@@ -34,10 +34,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { clearToken } from '../api/client'
 import { useIsMobile } from '../composables/useIsMobile'
 import MobileTabBar from '../mobile/MobileTabBar.vue'
+import { useNotificationPopups } from '../composables/useNotificationPopups'
 
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useIsMobile()
+useNotificationPopups()
 
 const showTabbar = computed(() => route.meta.mobileTab !== false)
 

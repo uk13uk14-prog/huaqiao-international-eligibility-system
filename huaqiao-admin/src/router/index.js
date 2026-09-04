@@ -17,6 +17,7 @@ import MobileApprovalView from '../mobile/MobileApprovalView.vue'
 import MobileAiView from '../mobile/MobileAiView.vue'
 import MobilePublishedView from '../mobile/MobilePublishedView.vue'
 import MobileMeView from '../mobile/MobileMeView.vue'
+import MobileNotificationsView from '../mobile/MobileNotificationsView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -53,6 +54,7 @@ const router = createRouter({
           meta: { mobile: true, mobileTab: false },
         },
         { path: 'm/published', component: MobilePublishedView, meta: { mobile: true } },
+        { path: 'm/notifications', component: MobileNotificationsView, meta: { mobile: true } },
         { path: 'm/me', component: MobileMeView, meta: { mobile: true } },
       ],
     },
