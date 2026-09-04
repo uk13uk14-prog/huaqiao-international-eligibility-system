@@ -82,7 +82,13 @@ PY
 }
 
 echo "==> Preflight SaaS backend (:8010) — required"
-curl -fsS "http://${SAAS_ADDR}/api/health" | tee /tmp/gq-saas.json
+if ! curl -fsS "http://${SAAS_ADDR}/api/health" | tee /tmp/gq-saas.json; then
+  echo
+  echo "ERROR: SaaS :8010 health failed (connection refused / not 200)."
+  echo "HINT: Do NOT use Homebrew system python3.12 — it has no project deps."
+  echo "HINT: Restore runtime once: bash deploy/api/m1-saas-runtime-recover.sh"
+  exit 1
+fi
 echo
 discover_student_list_from_openapi
 

@@ -92,9 +92,25 @@ CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibili
 ## 用户最小动作（M1）
 
 **已确认本仓 Cloud Agent 环境内 SaaS 监听端口为 `8010`（勿猜）。**  
-Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel 必须在 M1 执行一次。
+Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel / SaaS 恢复必须在 M1 执行一次。
 
-若 API 尚未解析 / 未接通，在 M1 仓库根目录执行：
+### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
+
+根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。
+
+**只执行这一条**（自动发现旧 runtime / 必要时建 `huaqiao-saas-pro/backend/.venv`、装 LaunchAgent、验 health/students、再跑 go-live）：
+
+```bash
+cd /path/to/huaqiao-international-eligibility-system
+git pull origin cursor/mobile-cloud-preview
+bash deploy/api/m1-saas-runtime-recover.sh
+```
+
+禁止：`sudo pip install`、向 Homebrew 系统 Python 全局装依赖、手工只装 fastapi/uvicorn、凭空新建生产库。
+
+详情：`deploy/api/M1_SAAS_RUNTIME.md`。
+
+### 若 `:8010` 已健康
 
 ```bash
 # 0) SaaS CORS（重启 backend 生效；禁止 *）
