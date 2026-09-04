@@ -19,7 +19,20 @@ git pull origin cursor/mobile-cloud-preview && \
 bash deploy/api/m1-production-db-upgrade-recover.sh
 ```
 
-## Checkpoint pipeline (FAIL CLOSED)
+## Checkpoint F note (alembic binding)
+
+`alembic.ini` defaults to `localhost:5432/huaqiao_saas`. `env.py` only overrides when
+`DATABASE_URL` is set; ConfigParser also treats `%` in URL-encoded passwords as
+interpolation — which made `alembic current` return empty while direct SQL still
+showed `003_r43_fix`.
+
+The recover script now:
+
+1. Loads `DATABASE_URL` from `backend/.env` (never prints it)
+2. Runs alembic via Python API with `url.replace("%", "%%")`
+3. Requires **A** direct SQL revision + **B** alembic current + **C** heads
+4. Does not overwrite an existing matching `.env`
+
 
 | CP | Action | Abort if |
 |----|--------|----------|

@@ -297,6 +297,20 @@ fi
 echo "ENV_READY=YES"
 
 # Clear password vars from shell where possible after URL built
+# Keep DB_URL for alembic binding (never echo). Prefer existing .env contents.
+DB_URL="$(
+  "${VENV_PY}" -c "
+from pathlib import Path
+p=Path(r'''${ENV_FILE}''')
+for line in p.read_text(encoding='utf-8').splitlines():
+    if line.strip().startswith('DATABASE_URL='):
+        print(line.split('=',1)[1].strip().strip(chr(34)).strip(chr(39)), end='')
+        break
+"
+)"
+[[ -n "${DB_URL}" ]] || abort "DB_URL empty after .env load"
+DATABASE_URL_REDACTED="$(redact_url "${DB_URL}")"
+echo "ENV_DATABASE_TARGET=$(echo "${DATABASE_URL_REDACTED}" | sed -E 's#^[^@]+@##')"
 unset _PG_PASS ENCODED_PASS REAL_URL
 
 # =====================================================================
@@ -315,9 +329,66 @@ fi
 "${VENV_PY}" -c 'import psycopg; print("PSYCOPG_IMPORT=PASS")' || abort "PSYCOPG_IMPORT=FAIL"
 echo "SYSTEM_PYTHON_MODIFIED=NO"
 
+# Helper: run alembic with explicit DATABASE_URL (ConfigParser needs % → %% in set_main_option).
+# Never prints URL/password. Always uses BACKEND as cwd + alembic.ini there.
+alembic_bound() {
+  # usage: alembic_bound current|heads|upgrade head|...
+  local op="$1"
+  shift || true
+  (
+    cd "${BACKEND}" || exit 1
+    export DATABASE_URL="${DB_URL}"
+    export ALEMBIC_OP="${op}"
+    export ALEMBIC_ARGS="$*"
+    "${VENV_PY}" - <<'PY'
+import os, re, sys
+from alembic.config import Config
+from alembic import command
+
+backend = os.getcwd()
+url = os.environ.get("DATABASE_URL") or ""
+if not url:
+    print("ALEMBIC_BIND_ERROR=missing_DATABASE_URL", file=sys.stderr)
+    raise SystemExit(2)
+
+# Prove binding target without secrets
+m = re.search(r"@([^/]+)/(\S+)", url)
+target = f"{m.group(1)}/{m.group(2)}" if m else "UNKNOWN"
+print(f"ALEMBIC_BOUND_TARGET={target}")
+
+cfg = Config(os.path.join(backend, "alembic.ini"))
+# CRITICAL: ConfigParser interpolation treats % specially
+cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+
+op = os.environ["ALEMBIC_OP"]
+args = os.environ.get("ALEMBIC_ARGS", "").split()
+try:
+    if op == "heads":
+        command.heads(cfg)
+    elif op == "current":
+        command.current(cfg, verbose=False)
+    elif op == "upgrade":
+        command.upgrade(cfg, args[0] if args else "head")
+    else:
+        print(f"ALEMBIC_BIND_ERROR=unknown_op:{op}", file=sys.stderr)
+        raise SystemExit(2)
+except Exception as e:
+    # Redact any URL-like substrings from error
+    msg = str(e)
+    msg = re.sub(r"postgresql\+?[^\s]+", "postgresql+psycopg://***", msg)
+    msg = re.sub(r":[^:@/]+@", ":***@", msg)
+    print(f"ALEMBIC_BIND_ERROR={msg}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+  )
+}
+
 # =====================================================================
 checkpoint "F ALEMBIC DRY INSPECTION"
 # =====================================================================
+echo "BACKEND_CWD=${BACKEND}"
+echo "ALEMBIC_INI=${BACKEND}/alembic.ini"
+[[ -f "${BACKEND}/alembic.ini" ]] || abort "missing alembic.ini"
 [[ -f "${BACKEND}/alembic/versions/004_student_master_profile.py" ]] || abort "missing 004"
 [[ -f "${BACKEND}/alembic/versions/005_student_timeline.py" ]] || abort "missing 005"
 [[ -f "${BACKEND}/alembic/versions/006_student_profile_slots.py" ]] || abort "missing 006"
@@ -330,23 +401,46 @@ echo "$down004" | grep -q '003_r43_fix' || abort "004 down_revision invalid"
 echo "$down005" | grep -q '004_student_master_profile' || abort "005 down_revision invalid"
 echo "$down006" | grep -q '005_student_timeline' || abort "006 down_revision invalid"
 
-cd "${BACKEND}"
-# Load DATABASE_URL for alembic without printing
-export DATABASE_URL="$("${VENV_PY}" -c "
-from pathlib import Path
-for line in Path('.env').read_text(encoding='utf-8').splitlines():
-    if line.strip().startswith('DATABASE_URL='):
-        print(line.split('=',1)[1].strip().strip(chr(34)).strip(chr(39)))
-        break
-")"
-[[ -n "${DATABASE_URL:-}" ]] || abort "failed to load DATABASE_URL for alembic"
+# A) Direct SQL revision (same as Checkpoint A)
+DIRECT_DB_REVISION="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;")"
+DIRECT_DB_REVISION="$(echo "${DIRECT_DB_REVISION}" | tr -d '[:space:]')"
+echo "DIRECT_DB_REVISION=${DIRECT_DB_REVISION}"
+[[ "${DIRECT_DB_REVISION}" == "${EXPECTED_REV}" ]] || abort "direct SQL revision != ${EXPECTED_REV}"
 
-heads="$("${VENV_ALEMBIC}" heads 2>/dev/null || true)"
-echo "ALEMBIC_HEADS=${heads}"
-echo "${heads}" | grep -q "${TARGET_REV}" || abort "alembic heads missing ${TARGET_REV}"
-cur="$("${VENV_ALEMBIC}" current 2>/dev/null || true)"
-echo "ALEMBIC_CURRENT_CLI=${cur}"
-echo "${cur}" | grep -q "${EXPECTED_REV}" || abort "alembic current != ${EXPECTED_REV}"
+# Settings load check (redacted) — cwd=BACKEND so .env resolves
+SETTINGS_TARGET="$(
+  cd "${BACKEND}" && DATABASE_URL="${DB_URL}" "${VENV_PY}" - <<'PY'
+import os, re
+os.environ["DATABASE_URL"] = os.environ["DATABASE_URL"]
+from app.config import get_settings
+get_settings.cache_clear()
+u = get_settings().database_url
+m = re.search(r"@([^/]+)/(\S+)", u)
+print(f"{m.group(1)}/{m.group(2)}" if m else "UNKNOWN")
+PY
+)"
+echo "SETTINGS_DATABASE_TARGET=${SETTINGS_TARGET}"
+echo "${SETTINGS_TARGET}" | grep -q "${PG_PORT}/${PG_DB}" || abort "settings.database_url not bound to :${PG_PORT}/${PG_DB}"
+
+# B) Alembic current with explicit binding
+cur_out="$(alembic_bound current 2>/tmp/gq-alembic-current.err || true)"
+cur_err="$(cat /tmp/gq-alembic-current.err 2>/dev/null | sed -E 's#(://[^:/@]+:)[^@/]+@#\1***@#g' || true)"
+echo "${cur_out}"
+[[ -z "${cur_err}" ]] || echo "ALEMBIC_CURRENT_STDERR_REDACTED=${cur_err}"
+ALEMBIC_CURRENT_CLI="$(echo "${cur_out}" | grep -E "${EXPECTED_REV}|${TARGET_REV}" | head -1 | tr -d '[:space:]' || true)"
+# alembic current prints like: "003_r43_fix (head)" or just revision — normalize
+ALEMBIC_CURRENT_CLI="$(echo "${cur_out}" | grep -oE '[0-9]{3}_[a-z0-9_]+' | head -1 || true)"
+echo "ALEMBIC_CURRENT_CLI=${ALEMBIC_CURRENT_CLI}"
+[[ "${ALEMBIC_CURRENT_CLI}" == "${EXPECTED_REV}" ]] || abort "alembic current != ${EXPECTED_REV} (got '${ALEMBIC_CURRENT_CLI}') — check ALEMBIC_BOUND_TARGET"
+
+# C) Alembic heads
+heads_out="$(alembic_bound heads 2>/tmp/gq-alembic-heads.err || true)"
+echo "${heads_out}"
+ALEMBIC_HEADS="$(echo "${heads_out}" | grep -oE '[0-9]{3}_[a-z0-9_]+' | head -1 || true)"
+echo "ALEMBIC_HEADS=${ALEMBIC_HEADS}"
+[[ "${ALEMBIC_HEADS}" == "${TARGET_REV}" ]] || abort "alembic heads != ${TARGET_REV}"
+
+echo "EXPLICIT_DATABASE_URL_BINDING=YES"
 echo "ALEMBIC_CHAIN_VALID=YES"
 echo "MIGRATION_PATH=003→004→005→006"
 
@@ -356,7 +450,7 @@ checkpoint "G MIGRATION"
 echo "MIGRATION_STARTED=YES"
 MIGRATION_STARTED=YES
 ROLLBACK_REQUIRED=YES  # until post-checks pass
-if ! "${VENV_ALEMBIC}" upgrade head; then
+if ! alembic_bound upgrade head; then
   abort "alembic upgrade head FAILED — backup retained; do NOT auto-restore"
 fi
 POST_REV="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;")"
@@ -408,8 +502,8 @@ echo "STUDENT_TIMELINE_COUNT=${STUDENT_TIMELINE_COUNT}"
 echo "DATA_INTEGRITY=PASS"
 ROLLBACK_REQUIRED=NO
 
-# Unset DATABASE_URL from environment for remaining steps (uvicorn loads .env)
-unset DATABASE_URL
+# Unset bound URL from environment for remaining steps (uvicorn loads .env from file)
+unset DATABASE_URL DB_URL || true
 
 # =====================================================================
 checkpoint "J START SAAS 8010"
