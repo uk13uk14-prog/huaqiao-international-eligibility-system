@@ -206,9 +206,19 @@ def generate_for_timeline_item(
 
 
 def scan_student_timelines(
-    db: Session, *, today: date | None = None, limit_items: int | None = 500
+    db: Session,
+    *,
+    today: date | None = None,
+    limit_items: int | None = 500,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
-    ensure_default_rules(db)
+    """Scan personalized student timelines into reminder notifications.
+
+    dry_run=True: count candidates / would-create / dedupe skips only.
+    Never sends push, never shows popup, never writes rows when dry_run.
+    """
+    if not dry_run:
+        ensure_default_rules(db)
     today = today or date.today()
     start = today - timedelta(days=1)
     end = today + timedelta(days=31)
@@ -224,8 +234,11 @@ def scan_student_timelines(
         .all()
     )
     cancelled_n = 0
-    for item in done:
-        cancelled_n += cancel_reminders_for_completed_item(db, item, commit=False)
+    if not dry_run:
+        for item in done:
+            cancelled_n += cancel_reminders_for_completed_item(db, item, commit=False)
+    else:
+        cancelled_n = len(done)
 
     q = (
         db.query(StudentTimelineItem)
@@ -240,13 +253,61 @@ def scan_student_timelines(
     if limit_items:
         q = q.limit(limit_items)
     items = q.all()
+
+    if dry_run:
+        from .create import build_dedupe_key, find_existing
+
+        would_create = 0
+        dedupe_skipped = 0
+        for item in items:
+            if not item.deadline:
+                continue
+            event_type = infer_event_type(item.title or "", item.description or "")
+            student_rules = rules_for(db, event_type, ROLE_STUDENT)
+            days_list = [
+                int(r.days_before if r.days_before is not None else 0) for r in student_rules
+            ] or list(DEFAULT_DEADLINE_LADDER)
+            for days in days_list:
+                if event_type != "APPLICATION_DEADLINE" and days > 14 and not student_rules:
+                    continue
+                fire_date = item.deadline - timedelta(days=days)
+                scheduled_at = datetime.combine(fire_date, time(9, 0))
+                key = build_dedupe_key(
+                    recipient_user_id=item.user_id,
+                    student_id=item.student_id,
+                    source_type="student_timeline_item",
+                    source_id=str(item.id),
+                    event_type=event_type,
+                    scheduled_at=scheduled_at,
+                )
+                if find_existing(db, key):
+                    dedupe_skipped += 1
+                else:
+                    would_create += 1
+        db.rollback()
+        return {
+            "dry_run": True,
+            "scanned_items": len(items),
+            "candidate_count": len(items),
+            "would_create_count": would_create,
+            "dedupe_skipped_count": dedupe_skipped,
+            "would_cancel_completed": cancelled_n,
+            "created_or_existing": 0,
+            "cancelled": 0,
+            "today": today.isoformat(),
+        }
+
     created_n = 0
     for item in items:
         rows = generate_for_timeline_item(db, item, today=today, commit=False)
         created_n += len(rows)
     db.commit()
     return {
+        "dry_run": False,
         "scanned_items": len(items),
+        "candidate_count": len(items),
+        "would_create_count": 0,
+        "dedupe_skipped_count": 0,
         "created_or_existing": created_n,
         "cancelled": cancelled_n,
         "today": today.isoformat(),

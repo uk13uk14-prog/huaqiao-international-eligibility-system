@@ -120,13 +120,27 @@ def send_ready(db: Session, *, now: datetime | None = None, limit: int = 200) ->
     return {"sent": sent, "deferred": deferred, "failed": failed, "examined": len(rows)}
 
 
-def run_scheduler_tick(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
+def run_scheduler_tick(
+    db: Session, *, now: datetime | None = None, dry_run: bool = False
+) -> dict[str, Any]:
     now = now or datetime.utcnow()
-    scan = scan_student_timelines(db, today=now.date())
+    if dry_run:
+        scan = scan_student_timelines(db, today=now.date(), dry_run=True)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "at": now.isoformat(),
+            "scan": scan,
+            "promoted": 0,
+            "delivery": {"sent": 0, "deferred": 0, "failed": 0, "examined": 0},
+            "max_retries": MAX_SEND_RETRIES,
+        }
+    scan = scan_student_timelines(db, today=now.date(), dry_run=False)
     promoted = promote_due(db, now=now)
     delivery = send_ready(db, now=now)
     return {
         "ok": True,
+        "dry_run": False,
         "at": now.isoformat(),
         "scan": scan,
         "promoted": promoted,
