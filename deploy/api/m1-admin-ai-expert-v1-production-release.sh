@@ -40,12 +40,27 @@ _PG_USER=""
 _PG_PASS=""
 _PG_DBNAME=""
 DATABASE_URL=""
+VENV_PY="${BACKEND}/.venv/bin/python"
+DIAGNOSTIC_ONLY=NO
+ROLLBACK_REQUIRED=NO
+
+# Optional: --checkpoint-d-diagnostic-only (read-only; no backup/migrate/restart)
+for _arg in "$@"; do
+  case "${_arg}" in
+    --checkpoint-d-diagnostic-only) DIAGNOSTIC_ONLY=YES ;;
+    --help|-h)
+      echo "Usage: $0 [--checkpoint-d-diagnostic-only]"
+      exit 0
+      ;;
+  esac
+done
 
 abort() {
   echo "ABORT: $*" >&2
   echo "USER_ACTION_REQUIRED=YES"
   echo "MIGRATION_STARTED=${MIGRATION_STARTED}"
   echo "DATABASE_CHANGED=${MIGRATION_STARTED}"
+  echo "ROLLBACK_REQUIRED=${ROLLBACK_REQUIRED}"
   if [[ -n "${BACKUP_FILE}" ]]; then
     echo "BACKUP_FILE=${BACKUP_FILE}"
     echo "HINT: Do NOT auto pg_restore. Manual approve required for restore."
@@ -124,9 +139,219 @@ load_and_validate_database_url() {
   echo "DEFAULT_5432_BLOCKED=YES"
 }
 
+redact_err_file() {
+  local f="$1"
+  [[ -f "$f" ]] || { echo ""; return 0; }
+  sed -E 's#(://[^:/@]+:)[^@/]+@#\1***@#g; s#:([^:@/]+)@#:***@#g' "$f" | tr '\n' ' ' | head -c 2000
+  echo
+}
+
+# Bound alembic via backend .venv — NEVER system python3 -m alembic, NEVER 2>/dev/null swallow.
+# Prints ALEMBIC_BOUND_TARGET=host:port/db on stdout; errors to stderr (caller captures).
+alembic_bound() {
+  local op="$1"
+  shift || true
+  [[ -x "${VENV_PY}" ]] || { echo "ALEMBIC_BIND_ERROR=missing_venv_python:${VENV_PY}" >&2; return 2; }
+  (
+    cd "${BACKEND}" || exit 1
+    export DATABASE_URL="${DATABASE_URL}"
+    export ALEMBIC_OP="${op}"
+    export ALEMBIC_ARGS="$*"
+    "${VENV_PY}" - <<'PY'
+import os, re, sys
+from alembic.config import Config
+from alembic import command
+
+backend = os.getcwd()
+url = os.environ.get("DATABASE_URL") or ""
+if not url:
+    print("ALEMBIC_BIND_ERROR=missing_DATABASE_URL", file=sys.stderr)
+    raise SystemExit(2)
+if ":5432/" in url:
+    print("ALEMBIC_BIND_ERROR=refusing_port_5432", file=sys.stderr)
+    raise SystemExit(2)
+if "sqlite" in url.lower():
+    print("ALEMBIC_BIND_ERROR=sqlite_blocked", file=sys.stderr)
+    raise SystemExit(2)
+
+m = re.search(r"@([^/]+)/([^\s?]+)", url)
+target = f"{m.group(1)}/{m.group(2)}" if m else "UNKNOWN"
+print(f"ALEMBIC_BOUND_TARGET={target}")
+if "5433" not in target or not target.endswith("/huaqiao"):
+    print(f"ALEMBIC_BIND_ERROR=wrong_target:{target}", file=sys.stderr)
+    raise SystemExit(2)
+
+cfg = Config(os.path.join(backend, "alembic.ini"))
+# ConfigParser treats '%' as interpolation — URL-encoded passwords need '%%'
+cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+
+op = os.environ["ALEMBIC_OP"]
+args = os.environ.get("ALEMBIC_ARGS", "").split()
+try:
+    if op == "heads":
+        command.heads(cfg)
+    elif op == "current":
+        command.current(cfg, verbose=False)
+    elif op == "upgrade":
+        command.upgrade(cfg, args[0] if args else "head")
+    else:
+        print(f"ALEMBIC_BIND_ERROR=unknown_op:{op}", file=sys.stderr)
+        raise SystemExit(2)
+except Exception as e:
+    msg = str(e)
+    msg = re.sub(r"postgresql\+?[^\s]+", "postgresql+psycopg://***", msg)
+    msg = re.sub(r":[^:@/\s]+@", ":***@", msg)
+    print(f"ALEMBIC_BIND_ERROR={msg}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+  )
+}
+
+normalize_rev() {
+  # Extract first alembic-like revision token from text
+  echo "$1" | grep -oE '[0-9]{3}_[a-z0-9_]+' | head -1 || true
+}
+
+# Read-only CHECKPOINT D diagnostic (no upgrade). Fail closed on tooling/binding errors.
+run_checkpoint_d_diagnostic() {
+  section "CHECKPOINT D — DIAGNOSTIC (read-only)"
+  echo "BACKEND_CWD=${BACKEND}"
+  echo "ALEMBIC_INI=${BACKEND}/alembic.ini"
+  echo "PYTHON=${VENV_PY}"
+  echo "POSTGRES_TRANSACTIONAL_DDL=YES"
+
+  [[ -x "${VENV_PY}" ]] || abort "missing ${VENV_PY} — SaaS .venv required (do not use system python3)"
+  [[ -f "${BACKEND}/alembic.ini" ]] || abort "missing alembic.ini"
+  [[ -f "${BACKEND}/alembic/versions/007_admin_ai_expert_v1.py" ]] || abort "missing 007 migration file"
+
+  echo "PYTHON_VERSION=$("${VENV_PY}" -c 'import sys; print(sys.version.split()[0])')"
+
+  if ! "${VENV_PY}" -c 'import sqlalchemy, alembic' >/tmp/gq-p5-imp.err 2>&1; then
+    echo "SQLALCHEMY_ALEMBIC_IMPORT=FAIL"
+    echo "IMPORT_STDERR_REDACTED=$(redact_err_file /tmp/gq-p5-imp.err)"
+    abort "sqlalchemy/alembic import failed in .venv"
+  fi
+  echo "SQLALCHEMY_ALEMBIC_IMPORT=PASS"
+
+  if ! "${VENV_PY}" -c 'import psycopg' >/tmp/gq-p5-psycopg.err 2>&1; then
+    echo "PSYCOPG_IMPORT=FAIL"
+    echo "PSYCOPG_STDERR_REDACTED=$(redact_err_file /tmp/gq-p5-psycopg.err)"
+    abort "psycopg (v3) import failed — required for postgresql+psycopg:// DATABASE_URL"
+  fi
+  echo "PSYCOPG_IMPORT=PASS"
+
+  # Refuse wrong URL again
+  if echo "${DATABASE_URL}" | grep -qE ':5432/'; then
+    abort "DATABASE_URL port 5432 blocked before alembic diagnostic"
+  fi
+  echo "${DATABASE_URL}" | grep -qE '@(127\.0\.0\.1|localhost):5433/huaqiao($|\?)' \
+    || abort "DATABASE_URL not production 5433/huaqiao before alembic diagnostic"
+
+  DIRECT_DB_REVISION="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
+  echo "DIRECT_DB_REVISION=${DIRECT_DB_REVISION}"
+
+  # Schema evidence (no guessing) — report what exists NOW
+  EC_COLS="$(pg_sql "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='expert_consultations';" | tr -d '[:space:]')"
+  ER_COLS="$(pg_sql "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='eligibility_records';" | tr -d '[:space:]')"
+  AE_EXISTS="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='audit_events') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  echo "EXPERT_CONSULTATIONS_HAS_student_id=$(echo "${EC_COLS}" | grep -q 'student_id' && echo YES || echo NO)"
+  echo "EXPERT_CONSULTATIONS_HAS_ai_provider=$(echo "${EC_COLS}" | grep -q 'ai_provider' && echo YES || echo NO)"
+  echo "ELIGIBILITY_HAS_student_id=$(echo "${ER_COLS}" | grep -q 'student_id' && echo YES || echo NO)"
+  echo "AUDIT_EVENTS_EXISTS=${AE_EXISTS}"
+
+  # Partial apply detection (007 columns present while still on 006, or vice versa)
+  MIGRATION_PARTIAL_OR_INCONSISTENT=NO
+  if [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]]; then
+    if echo "${EC_COLS}" | grep -q 'ai_provider' || [[ "${AE_EXISTS}" == "YES" ]]; then
+      MIGRATION_PARTIAL_OR_INCONSISTENT=YES
+    fi
+  fi
+  if [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_AFTER}" ]]; then
+    if ! echo "${EC_COLS}" | grep -q 'ai_provider' || [[ "${AE_EXISTS}" != "YES" ]]; then
+      MIGRATION_PARTIAL_OR_INCONSISTENT=YES
+    fi
+  fi
+  echo "MIGRATION_PARTIAL_OR_INCONSISTENT=${MIGRATION_PARTIAL_OR_INCONSISTENT}"
+  if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT}" == "YES" ]]; then
+    echo "NOTE=Schema/alembic_version inconsistency detected — do NOT guess; inspect before re-run upgrade"
+  fi
+
+  # Alembic current/heads via bound .venv (stderr captured — never discarded)
+  set +e
+  cur_out="$(alembic_bound current 2>/tmp/gq-p5-alembic-current.err)"
+  cur_rc=$?
+  set -e
+  echo "${cur_out}"
+  ALEMBIC_DATABASE_TARGET="$(echo "${cur_out}" | grep -E '^ALEMBIC_BOUND_TARGET=' | head -1 | cut -d= -f2- || true)"
+  echo "ALEMBIC_DATABASE_TARGET=${ALEMBIC_DATABASE_TARGET}"
+  echo "ALEMBIC_CURRENT_EXIT=${cur_rc}"
+  if [[ "${cur_rc}" -ne 0 ]]; then
+    echo "ALEMBIC_CURRENT_STDERR_REDACTED=$(redact_err_file /tmp/gq-p5-alembic-current.err)"
+    echo "CHECKPOINT_D_DIAGNOSTIC=FAIL"
+    abort "alembic current failed (exit=${cur_rc}) — was previously silent due to 2>/dev/null + pipefail"
+  fi
+  ALEMBIC_CURRENT="$(normalize_rev "${cur_out}")"
+  echo "ALEMBIC_CURRENT=${ALEMBIC_CURRENT}"
+
+  set +e
+  heads_out="$(alembic_bound heads 2>/tmp/gq-p5-alembic-heads.err)"
+  heads_rc=$?
+  set -e
+  echo "${heads_out}"
+  echo "ALEMBIC_HEADS_EXIT=${heads_rc}"
+  if [[ "${heads_rc}" -ne 0 ]]; then
+    echo "ALEMBIC_HEADS_STDERR_REDACTED=$(redact_err_file /tmp/gq-p5-alembic-heads.err)"
+    echo "CHECKPOINT_D_DIAGNOSTIC=FAIL"
+    abort "alembic heads failed (exit=${heads_rc})"
+  fi
+  ALEMBIC_HEADS="$(normalize_rev "${heads_out}")"
+  echo "ALEMBIC_HEADS=${ALEMBIC_HEADS}"
+
+  echo "${ALEMBIC_DATABASE_TARGET}" | grep -qE '5433/huaqiao' \
+    || abort "ALEMBIC_DATABASE_TARGET not 5433/huaqiao"
+
+  if [[ "${ALEMBIC_CURRENT}" != "${DIRECT_DB_REVISION}" ]]; then
+    echo "CHECKPOINT_D_DIAGNOSTIC=FAIL"
+    abort "ALEMBIC_CURRENT (${ALEMBIC_CURRENT}) != DIRECT_DB_REVISION (${DIRECT_DB_REVISION})"
+  fi
+
+  [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] || abort "alembic heads != ${EXPECTED_AFTER} (got ${ALEMBIC_HEADS})"
+
+  echo "CHECKPOINT_D_DIAGNOSTIC=PASS"
+  echo "SYSTEM_PYTHON_ALEMBIC_USED=NO"
+  echo "STDERR_SWALLOWED=NO"
+}
+
+report_migration_failure() {
+  local exit_code="$1"
+  local err_file="$2"
+  ROLLBACK_REQUIRED=YES
+  echo "MIGRATION=FAIL"
+  echo "MIGRATION_EXIT_CODE=${exit_code}"
+  echo "MIGRATION_STDERR_REDACTED=$(redact_err_file "${err_file}")"
+  local after_rev
+  after_rev="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | tr -d '[:space:]' || echo UNKNOWN)"
+  echo "DB_REVISION_AFTER_FAILED_ATTEMPT=${after_rev}"
+  # Schema evidence after failed attempt
+  local ae
+  ae="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='audit_events') THEN 'YES' ELSE 'NO' END;" 2>/dev/null | tr -d '[:space:]' || echo UNKNOWN)"
+  echo "AUDIT_EVENTS_EXISTS_AFTER_FAIL=${ae}"
+  if [[ "${after_rev}" == "${EXPECTED_BEFORE}" && "${ae}" == "NO" ]]; then
+    echo "PG_TRANSACTION_LIKELY_ROLLED_BACK=YES"
+    echo "ROLLBACK_REQUIRED=NO"
+    ROLLBACK_REQUIRED=NO
+  else
+    echo "PG_TRANSACTION_LIKELY_ROLLED_BACK=NO_OR_UNKNOWN"
+    echo "ROLLBACK_REQUIRED=YES"
+    ROLLBACK_REQUIRED=YES
+  fi
+  echo "HINT: Do NOT auto pg_restore. Backup retained at BACKUP_FILE=${BACKUP_FILE}"
+}
+
 echo "============================================================"
 echo "GUOQIAO ADMIN AI EXPERT V1 — PHASE 5 PRODUCTION RELEASE"
 echo "ROOT=${ROOT}"
+echo "DIAGNOSTIC_ONLY=${DIAGNOSTIC_ONLY}"
 echo "CNBER_CHANGED=NO MAIN_CHANGED=NO SEED_RUN=NO SQLITE_FALLBACK=BLOCKED"
 echo "AUTO_PG_RESTORE=NO FAIL_CLOSED=YES"
 echo "============================================================"
@@ -196,6 +421,16 @@ else
   SKIP_MIGRATE=NO
 fi
 
+# Read-only diagnostic can run immediately after fingerprint (no backup / no upgrade).
+if [[ "${DIAGNOSTIC_ONLY}" == "YES" ]]; then
+  run_checkpoint_d_diagnostic
+  echo "PRODUCTION_DB_CHANGED=NO"
+  echo "MIGRATION_STARTED=NO"
+  echo "BACKUP_PRESERVED=YES"
+  echo "DIAGNOSTIC_ONLY_EXIT=YES"
+  exit 0
+fi
+
 section "CHECKPOINT C — BACKUP"
 mkdir -p "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}" || true
@@ -223,32 +458,46 @@ echo "BACKUP_VERIFIED=YES"
 echo "BACKUP_BEFORE_MIGRATION=YES"
 echo "MIGRATION_ALLOWED_ONLY_AFTER_BACKUP=YES"
 
+# Always run read-only D diagnostic before any upgrade (uses .venv; never swallows stderr).
+run_checkpoint_d_diagnostic
+
 if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   section "CHECKPOINT D — APPLY 007"
-  cd "${BACKEND}"
-  export DATABASE_URL
-  # Refuse wrong target again (defense in depth)
-  case "${DATABASE_URL}" in
-    *":5433/"*"huaqiao"*) ;;
-    *) abort "DATABASE_URL not production 5433/huaqiao before alembic" ;;
-  esac
-  if echo "${DATABASE_URL}" | grep -qE ':5432/'; then
-    abort "DATABASE_URL port 5432 blocked before alembic"
-  fi
+  echo "ALEMBIC_CWD=${BACKEND}"
+  echo "ALEMBIC_PYTHON=${VENV_PY}"
+  echo "ALEMBIC_DATABASE_TARGET_PRE=$(echo "${DATABASE_URL}" | sed -E 's#^[^@]+@##; s#\?.*##')"
+  echo "USING_SYSTEM_PYTHON3_M_ALEMBIC=NO"
 
-  BEFORE="$(python3 -m alembic current 2>/dev/null | tail -1 | awk '{print $1}')"
-  echo "ALEMBIC_CURRENT_BEFORE=${BEFORE}"
-  [[ "${BEFORE}" == "${EXPECTED_BEFORE}" ]] || abort "alembic current != 006 before upgrade"
-  HEADS="$(python3 -m alembic heads 2>/dev/null | awk '{print $1}')"
-  echo "ALEMBIC_HEADS=${HEADS}"
-  echo "${HEADS}" | grep -qx "${EXPECTED_AFTER}" || abort "alembic heads != 007"
+  [[ "${ALEMBIC_CURRENT}" == "${EXPECTED_BEFORE}" ]] \
+    || abort "refuse upgrade: ALEMBIC_CURRENT=${ALEMBIC_CURRENT} != ${EXPECTED_BEFORE}"
+  [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]] \
+    || abort "refuse upgrade: DIRECT_DB_REVISION=${DIRECT_DB_REVISION} != ${EXPECTED_BEFORE}"
+  [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] \
+    || abort "refuse upgrade: ALEMBIC_HEADS=${ALEMBIC_HEADS} != ${EXPECTED_AFTER}"
+  [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" != "YES" ]] \
+    || abort "refuse upgrade: MIGRATION_PARTIAL_OR_INCONSISTENT=YES — inspect schema first"
 
   MIGRATION_STARTED=YES
   echo "MIGRATION_STARTED=YES"
-  GUOQIAO_SKIP_SEED=1 python3 -m alembic upgrade head
-  AFTER="$(python3 -m alembic current 2>/dev/null | tail -1 | awk '{print $1}')"
+  set +e
+  alembic_bound upgrade head >/tmp/gq-p5-alembic-upgrade.out 2>/tmp/gq-p5-alembic-upgrade.err
+  up_rc=$?
+  set -e
+  # Always show bound target line from stdout if present
+  grep -E '^ALEMBIC_BOUND_TARGET=' /tmp/gq-p5-alembic-upgrade.out 2>/dev/null || true
+  if [[ "${up_rc}" -ne 0 ]]; then
+    report_migration_failure "${up_rc}" /tmp/gq-p5-alembic-upgrade.err
+    abort "alembic upgrade head failed — fail closed"
+  fi
+
+  AFTER="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
   echo "DB_REVISION_AFTER=${AFTER}"
-  [[ "${AFTER}" == "${EXPECTED_AFTER}" ]] || abort "upgrade did not land on 007"
+  if [[ "${AFTER}" != "${EXPECTED_AFTER}" ]]; then
+    report_migration_failure "rev_mismatch" /tmp/gq-p5-alembic-upgrade.err
+    abort "upgrade did not land on 007 (got ${AFTER})"
+  fi
+  ROLLBACK_REQUIRED=NO
+  echo "ROLLBACK_REQUIRED=NO"
   echo "MIGRATION=PASS"
 else
   echo "MIGRATION=SKIPPED_ALREADY_007"
@@ -256,9 +505,8 @@ fi
 
 section "CHECKPOINT E — SCHEMA VERIFY"
 export DATABASE_URL
-python3 - <<'PY'
+"${VENV_PY}" - <<'PY'
 import os, sys
-from pathlib import Path
 from sqlalchemy import create_engine, inspect
 
 url = os.environ.get("DATABASE_URL") or ""
@@ -268,7 +516,7 @@ if ":5432/" in url:
     print("REFUSE_5432"); sys.exit(1)
 if "sqlite" in url.lower():
     print("SQLITE_BLOCKED"); sys.exit(1)
-if ":5433/" not in url or "/huaqiao" not in url:
+if ":5433/" not in url or "/huaqiao" not in url.split("?")[0]:
     print("WRONG_TARGET"); sys.exit(1)
 
 e = create_engine(url)
