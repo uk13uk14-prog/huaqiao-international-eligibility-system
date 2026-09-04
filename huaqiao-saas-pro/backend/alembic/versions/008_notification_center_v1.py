@@ -1,21 +1,13 @@
-"""008 Notification Center V1 — DRAFT / NOT FOR PRODUCTION APPLY.
+"""008 Notification Center V1.
 
 Revision ID: 008_notification_center_v1
 Revises: 007_admin_ai_expert_v1
 
-PROPOSAL ONLY:
-  - Creates notifications, notification_rules, notification_devices, notification_preferences
-  - Seeds default reminder rules (30/14/7/3/1/0 days)
-  - Additive only; no drops; no backfill of secrets
+Creates notifications, notification_rules, notification_devices, notification_preferences
+and seeds default reminder rules (30/14/7/3/1/0 days). Additive only; no drops.
 
-Staging procedure (never production until explicit ops window):
-  1. Backup staging DB
-  2. alembic upgrade 007_admin_ai_expert_v1 → 008_notification_center_v1
-  3. alembic downgrade -1
-  4. alembic upgrade head
-  5. Run pytest tests/test_notification_center_v1.py
-
-Production apply: FORBIDDEN in this PR / cloud agent turn.
+Staging: apply via scripts/staging_migrate_008.sh against huaqiao_admin_staging @:5432.
+Production apply: FORBIDDEN until explicit ops window + backup (not this agent turn).
 """
 from __future__ import annotations
 
@@ -26,8 +18,6 @@ revision = "008_notification_center_v1"
 down_revision = "007_admin_ai_expert_v1"
 branch_labels = None
 depends_on = None
-
-# Copy of this file may be promoted to alembic/versions/ only after staging PASS.
 
 
 def upgrade() -> None:

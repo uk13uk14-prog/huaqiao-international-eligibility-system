@@ -382,14 +382,14 @@ class TestAiPublishFlow:
                 db.close()
 
 
-class TestMigrationDraft:
-    def test_008_draft_exists_and_not_in_versions(self):
+class TestMigration008:
+    def test_008_promoted_to_versions(self):
         root = Path(__file__).resolve().parents[1] / "alembic"
         draft = root / "drafts" / "008_notification_center_v1_NOT_APPLIED.py"
+        live = root / "versions" / "008_notification_center_v1.py"
         assert draft.exists()
-        versions = list((root / "versions").glob("*008*"))
-        assert not versions
-        text = draft.read_text()
-        assert "008_notification_center_v1" in text
-        assert "007_admin_ai_expert_v1" in text or "007_admin_ai_expert" in text
-        # MIGRATION_008 draft only
+        assert live.exists()
+        text = live.read_text()
+        assert 'revision = "008_notification_center_v1"' in text
+        assert 'down_revision = "007_admin_ai_expert_v1"' in text
+        assert "sa.true()" in text  # Postgres-safe boolean defaults
