@@ -134,6 +134,16 @@ bash deploy/api/m1-runtime-secret-bootstrap-and-go-live.sh
 
 见 `deploy/api/RUNTIME_SECRET_BOOTSTRAP.md`（旧 JWT session 失效可接受；不 commit `.env`；缺 Tunnel credential 时 `USER_ACTION_REQUIRED`）。
 
+### 持久 Tunnel + 生产冻结（当前最后一步）
+
+当 `:8010` / Caddy / secrets 已 PASS，仅缺 `TUNNEL_PERSISTENT`：
+
+```bash
+bash deploy/api/m1-persistent-tunnel-and-freeze.sh
+```
+
+若提示缺 cert：先执行唯一人工动作 `cloudflared tunnel login`，再重跑。见 `deploy/api/PERSISTENT_TUNNEL.md`。
+
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 
 根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。
