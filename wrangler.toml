@@ -1,0 +1,22 @@
+# Cloudflare Workers Builds runs from REPO ROOT with:
+#   Deploy command: npx wrangler versions upload
+#   Build command:  (often None)
+#
+# This config must therefore:
+# 1) declare assets relative to repo root
+# 2) build huaqiao-app/dist before upload via [build].command
+#
+# Worker name matches the existing Git-connected Worker
+# (do not delete / replace with a different product). Preferred alias URL
+# guoqiao-mobile-preview can be added later; fixed HTTPS is this workers.dev.
+
+name = "huaqiao-international-eligibility-system"
+compatibility_date = "2025-09-04"
+
+[assets]
+directory = "./huaqiao-app/dist"
+not_found_handling = "single-page-application"
+
+# Runs automatically before `wrangler deploy` / `wrangler versions upload`
+[build]
+command = "npm run build:h5"

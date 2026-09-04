@@ -1,2 +1,5 @@
-# Cloudflare Pages：单页 H5 回退（本应用以 Tab 导航为主，无 vue-router；保留以兼容直链刷新）
-/*    /index.html   200
+# SPA fallback is configured in repo-root wrangler.toml:
+#   [assets] not_found_handling = "single-page-application"
+#
+# Do NOT add `/* /index.html 200` here — Cloudflare Workers Static Assets
+# treats that as an infinite redirect loop (error 100324).

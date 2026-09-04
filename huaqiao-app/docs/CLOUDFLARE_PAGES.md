@@ -1,24 +1,21 @@
-# Cloudflare Workers / Pages — guoqiao-mobile-preview (H5 fixed preview)
+# Fixed H5 preview — Cloudflare Workers Static Assets (Workers Builds)
 #
-# Product: Workers Static Assets (unified platform; not the mistaken Worker
-# `huaqiao-international-eligibility-system`).
+# Cloudflare Git Build (repo root):
+#   Root directory = /
+#   Build command  = None  (handled by wrangler.toml [build].command)
+#   Deploy command = npx wrangler versions upload
 #
-# Auto-deploy: GitHub Actions on push to `cursor/mobile-cloud-preview`
-#   workflow: .github/workflows/deploy-h5-preview.yml
-#   secrets (repo): CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# Wrangler config (repo root):
+#   wrangler.toml → assets.directory = ./huaqiao-app/dist
+#   [build].command = npm run build:h5
 #
-# Local / CI deploy (after npm run build):
-#   npx wrangler deploy
+# Worker (existing Git-connected, do not delete):
+#   huaqiao-international-eligibility-system
+# Fixed URL:
+#   https://huaqiao-international-eligibility-system.workers.dev
 #
-# Fixed URL (after first successful deploy):
-#   https://guoqiao-mobile-preview.workers.dev
+# Local:
+#   npm install
+#   npm run deploy:h5
 #
-# Build (run from huaqiao-app/):
-#   npm ci && npm run build  →  dist/
-#
-# Env (Preview / Production build vars — HTTPS only, never Tailscale/LAN):
-#   VITE_API_BASE=
-#   VITE_SAAS_API=
-#
-# SPA fallback: wrangler.toml assets.not_found_handling = single-page-application
-# Also keep public/_redirects for Pages compatibility if Git Pages is used later.
+# Never put Tailscale / LAN / localhost into VITE_API_BASE / VITE_SAAS_API.

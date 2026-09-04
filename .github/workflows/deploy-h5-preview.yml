@@ -6,6 +6,9 @@ on:
       - cursor/mobile-cloud-preview
     paths:
       - "huaqiao-app/**"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/deploy-h5-preview.yml"
   workflow_dispatch:
 
@@ -18,11 +21,8 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and deploy guoqiao-mobile-preview
+    name: Build and deploy H5 static Worker
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: huaqiao-app
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,47 +32,37 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: huaqiao-app/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            huaqiao-app/package-lock.json
 
-      - name: Install
-        run: npm ci
+      - name: Install root (wrangler)
+        run: npm install
 
-      - name: Build
-        run: npm run build
+      - name: Build huaqiao-app
+        run: npm run build:h5
         env:
-          # Leave empty for static shell; never inject Tailscale/LAN here
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}
           VITE_SAAS_API: ${{ vars.VITE_SAAS_API }}
 
       - name: Verify dist
         run: |
-          test -f dist/index.html
-          test -d dist/assets
-          ls -la dist dist/assets
-
-      - name: Require Cloudflare secrets
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"
-            echo "Create a Cloudflare API token with Workers Scripts Edit, then add it as a repository secret."
-            exit 1
-          fi
-          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"
-            echo "Find Account ID in Cloudflare Dashboard → Workers & Pages → Overview (right sidebar)."
-            exit 1
-          fi
+          test -f huaqiao-app/dist/index.html
+          test -d huaqiao-app/dist/assets
+          ls -la huaqiao-app/dist huaqiao-app/dist/assets
 
       - name: Deploy to Cloudflare Workers (static assets)
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: huaqiao-app
           packageManager: npm
           command: deploy
-          # Creates/updates Worker "guoqiao-mobile-preview" from wrangler.toml
-          # Uses local wrangler from huaqiao-app/package.json (v4+)
+          # Uses repo-root wrangler.toml → Worker huaqiao-international-eligibility-system
+
+      - name: Skip note when secrets absent
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' || secrets.CLOUDFLARE_ACCOUNT_ID == '' }}
+        run: |
+          echo "GitHub secrets not set; Cloudflare Git Workers Builds remains the primary auto-deploy path."
+          echo "Root wrangler.toml + [build].command must satisfy: npx wrangler versions upload"
