@@ -7,7 +7,8 @@ from .services.security import hash_password
 from .services.university_catalog import DEFAULT_SCHEDULES, FIELD_SCHEDULES, UNIVERSITIES
 
 PLAN_DATA = [
-    ("free", "免费版", 0, 0, "基础国际生/华侨生判定，有限院校浏览；高阶功能需开通会员。"),
+    ("free", "免费版", 0, 0, "基础国际生/华侨生判定；试用到期后有限院校浏览；高阶功能需开通会员。"),
+    ("pro_trial", "Pro 完整体验（7天）", 0, 7, "新用户自动开通：7 天内体验当前 Pro 软件功能（全量院校库、学生档案、规划等）。"),
     ("vip_month", "月会员", 799, 30, "全量院校库、一对一专家咨询与报告链、定制专家报告。"),
     ("vip_year", "年会员", 999, 365, "含月会员权益；完整智能时间轴与关键节点提醒。"),
     ("vip_three_year", "三年会员", 1999, 1095, "含年会员权益；长周期证件与资格年限跟踪。"),
@@ -172,14 +173,15 @@ def seed_data(db: Session):
             plan = MembershipPlan(code=code)
             db.add(plan)
         plan.name, plan.price, plan.duration_days, plan.description = name, price, days, desc
-        plan.is_active = code not in {"monthly", "yearly"}
+        plan.is_active = code not in {"monthly", "yearly", "pro_trial"}
         plan.features = json.dumps(
             {
                 "international_core": True,
-                "full_library": code != "free",
-                "report_export": code != "free",
-                "one_on_one_expert": code != "free",
+                "full_library": code not in {"free"},
+                "report_export": code not in {"free"},
+                "one_on_one_expert": code not in {"free"},
                 "smart_timeline": code in {"vip_year", "vip_three_year", "yearly", "lifetime"},
+                "pro_trial": code == "pro_trial",
             },
             ensure_ascii=False,
         )

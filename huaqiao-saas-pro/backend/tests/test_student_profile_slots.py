@@ -55,6 +55,9 @@ def _register(client, plan="free", override=None):
         user.plan_code = plan
         if plan != "free":
             user.membership_until = datetime.utcnow() + timedelta(days=365)
+        else:
+            # Clear auto-granted trial so tests can force free tier
+            user.membership_until = None
         user.student_profile_limit_override = override
         db.add(user)
         db.commit()

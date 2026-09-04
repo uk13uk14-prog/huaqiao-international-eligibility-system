@@ -8,6 +8,19 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import AuthToken, User
 from ..config import get_settings
+from .membership_trial import (
+    ALL_MEMBERSHIP_PLANS,
+    LEGACY_TEST_PAID_PLANS,
+    TRIAL_DAYS,
+    TRIAL_PLAN_CODE,
+    VIP_PAID_PLANS,
+    has_smart_timeline,
+    is_paid,
+    trial_info,
+)
+
+# Back-compat alias used by older tests / docs
+PAID_PLANS = LEGACY_TEST_PAID_PLANS | VIP_PAID_PLANS | {TRIAL_PLAN_CODE} | {"lifetime"}
 
 
 def hash_password(password: str) -> str:
@@ -76,27 +89,6 @@ def get_current_user(authorization: str = Header(""), db: Session = Depends(get_
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
     return user
-
-
-# ============================================================
-# 权限判断辅助函数
-# ============================================================
-
-PAID_PLANS = {"pro_monthly", "pro_yearly", "pro_plus_yearly"}
-
-
-def is_paid(user) -> bool:
-    """判断用户是否为付费用户"""
-    if not user or not user.plan_code:
-        return False
-    return user.plan_code in PAID_PLANS
-
-
-def has_smart_timeline(user) -> bool:
-    """判断用户是否拥有智能时间线功能（pro_plus_yearly 专属）"""
-    if not user or not user.plan_code:
-        return False
-    return user.plan_code == "pro_plus_yearly"
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

@@ -54,7 +54,8 @@ from .services.recommend import recommend
 from .services.eligibility_engine import evaluate_international_student, evaluate_overseas_chinese_student, InternationalStudentInput, OverseasChineseStudentInput
 from .services.rules import judge_huaqiao, judge_international  # DEPRECATED: kept for backward compat, not used for final policy decision
 from .services.eligibility_engine import evaluate_overseas_chinese_student, evaluate_international_student
-from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password
+from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password, trial_info
+from .services.membership_trial import grant_new_user_pro_trial
 from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
 from .services.privacy import redact_log_message, AuditLogger, AuditAction
 
@@ -140,7 +141,26 @@ def health():
 
 def user_payload(user: User, db: Session | None = None):
     fs = feature_summary(user, db)
-    return {"id": user.id, "tenant_id": user.tenant_id, "email": user.email, "name": user.name, "role": user.role, "plan_code": user.plan_code, "membership_until": user.membership_until.isoformat() if user.membership_until else None, "paid": fs["paid"], "features": fs, "student_profile_limit_override": getattr(user, "student_profile_limit_override", None)}
+    trial = trial_info(user)
+    return {
+        "id": user.id,
+        "tenant_id": user.tenant_id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "plan_code": user.plan_code,
+        "plan": user.plan_code,
+        "membership_until": user.membership_until.isoformat() if user.membership_until else None,
+        "paid": fs["paid"],
+        "is_pro": fs["is_pro"],
+        "trial_status": trial["trial_status"],
+        "trial_active": trial["trial_active"],
+        "trial_started_at": trial["trial_started_at"],
+        "trial_ends_at": trial["trial_ends_at"],
+        "trial_days_remaining": trial["trial_days_remaining"],
+        "features": fs,
+        "student_profile_limit_override": getattr(user, "student_profile_limit_override", None),
+    }
 
 
 @app.post("/api/auth/register")
@@ -150,7 +170,16 @@ def register(request: Request, data: RegisterIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="邮箱已注册")
     tenant = Tenant(name=data.tenant_name, tenant_type=data.tenant_type)
     db.add(tenant); db.flush()
-    user = User(tenant_id=tenant.id, email=data.email, name=data.name or data.email, password_hash=hash_password(data.password), role="member", plan_code="free")
+    user = User(
+        tenant_id=tenant.id,
+        email=data.email,
+        name=data.name or data.email,
+        password_hash=hash_password(data.password),
+        role="member",
+        plan_code="free",
+    )
+    # New registrations only: 7-day Pro Trial (does not rewrite existing users).
+    grant_new_user_pro_trial(user)
     db.add(user); db.commit(); db.refresh(user)
     token = create_token(db, user)
     return {"token": token, "user": user_payload(user, db)}
@@ -181,11 +210,20 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 
 @app.get("/api/membership/entitlements")
 def membership_entitlements(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Extended membership entitlements including student profile seats."""
+    """Extended membership entitlements including trial + student profile seats."""
     e = entitlements(user, db)
+    fs = feature_summary(user, db)
+    trial = trial_info(user)
     return {
         "plan_code": user.plan_code,
+        "plan": user.plan_code,
         "paid": is_paid(user),
+        "is_pro": is_paid(user),
+        "trial_status": trial["trial_status"],
+        "trial_active": trial["trial_active"],
+        "trial_started_at": trial["trial_started_at"],
+        "trial_ends_at": trial["trial_ends_at"],
+        "trial_days_remaining": trial["trial_days_remaining"],
         "student_profile_limit": e["student_profile_limit"],
         "student_profile_used": e.get("student_profile_used", 0),
         "student_profile_remaining": e.get("student_profile_remaining", 0),
@@ -195,7 +233,7 @@ def membership_entitlements(user: User = Depends(get_current_user), db: Session 
         "recommend_limit": e["recommend_limit"],
         "record_limit": e["record_limit"],
         "report_export": e["report_export"],
-        "features": feature_summary(user, db),
+        "features": fs,
     }
 
 
