@@ -94,6 +94,16 @@ CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibili
 **已确认本仓 Cloud Agent 环境内 SaaS 监听端口为 `8010`（勿猜）。**  
 Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel / SaaS 恢复必须在 M1 执行一次。
 
+若 `:8010` 已挂且 **缺 `.env` / 疑似会落到空 SQLite**：先做只读库源发现（不写配置、不启动 backend）：
+
+```bash
+cd /Users/agent001/deploy/huaqiao-international-eligibility-system
+git pull origin cursor/mobile-cloud-preview
+bash deploy/api/m1-db-source-discover.sh
+```
+
+见 `deploy/api/DB_SOURCE_RECOVERY.md`。`DATABASE_SOURCE_CONFIRMED=YES` 之前禁止恢复启动。
+
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 
 根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。

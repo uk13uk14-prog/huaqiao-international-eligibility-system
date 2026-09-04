@@ -273,18 +273,15 @@ if [[ -f "${BACKEND}/.env" ]]; then
   fi
 fi
 
-# Default sqlite file used by app when no DATABASE_URL — prefer existing production file
+# Default sqlite fallback is BLOCKED for production recovery.
+# Prefer postgres via .env; never create empty saas_pro.db.
 if [[ "$DATABASE_SOURCE" == "unknown" ]]; then
   if [[ -f "${BACKEND}/saas_pro.db" ]]; then
-    DATABASE_SOURCE="sqlite_default:./saas_pro.db (existing file; app default)"
-    info "No .env DATABASE_URL; existing saas_pro.db will be used by app default"
-  elif [[ -f "${BACKEND}/saas_manual.db" ]]; then
-    # Do NOT silently switch production to manual — only note
-    info "WARN: saas_manual.db present but no .env; app default is still ./saas_pro.db"
-    DATABASE_SOURCE="sqlite_default:./saas_pro.db (missing file may be created — STOP if production was postgres)"
+    DATABASE_SOURCE="sqlite_existing_file_only (still requires DATABASE_URL in .env for guard PASS)"
+    info "Found existing saas_pro.db — still need explicit DATABASE_URL in .env to start"
   else
-    info "WARN: no .env and no saas_pro.db — starting may create empty sqlite. Prefer restoring old .env."
-    DATABASE_SOURCE="sqlite_default:./saas_pro.db (file missing)"
+    DATABASE_SOURCE="MISSING"
+    info "No .env DATABASE_URL and no saas_pro.db"
   fi
 fi
 
@@ -298,6 +295,14 @@ if [[ ! -f "${BACKEND}/.env" ]]; then
       break
     fi
   done
+fi
+
+info "PRODUCTION_DB_GUARD (FAIL CLOSED — no empty sqlite)"
+if ! bash "${ROOT}/deploy/api/production-db-guard.sh" "$BACKEND"; then
+  echo "ERROR: Refusing to start SaaS without confirmed DATABASE_URL/.env"
+  echo "HINT: bash deploy/api/m1-db-source-discover.sh"
+  echo "HINT: Only after DATABASE_SOURCE_CONFIRMED=YES, restore backend/.env (separate step — not auto)."
+  exit 1
 fi
 
 # ---------- Phase 3: write runtime state + LaunchAgent ----------

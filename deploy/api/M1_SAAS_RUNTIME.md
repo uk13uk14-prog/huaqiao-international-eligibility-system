@@ -32,6 +32,16 @@ Python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 
 本仓 **无** 既有 LaunchAgent/plist；现网 `:8010` 此前多为手工/venv `uvicorn`。
 
+## Database before runtime
+
+If `backend/.env` is missing, **do not** run runtime recover yet. First:
+
+```bash
+bash deploy/api/m1-db-source-discover.sh
+```
+
+See `DB_SOURCE_RECOVERY.md`. `production-db-guard.sh` blocks empty SQLite fallback.
+
 ## ONE_SHOT（M1）
 
 ```bash
