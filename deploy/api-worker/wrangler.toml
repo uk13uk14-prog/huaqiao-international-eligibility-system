@@ -1,0 +1,8 @@
+name = "guoqiao-api"
+main = "src/index.js"
+compatibility_date = "2025-09-04"
+workers_dev = true
+
+routes = [
+  { pattern = "api.guoqiaoplan.com", custom_domain = true }
+]
