@@ -18,6 +18,10 @@ venv/
 *.key
 *secret*
 !*.example
+# Allow committed ops tooling / docs that mention "secret" in the filename
+!deploy/api/m1-runtime-secret-*.sh
+!deploy/api/RUNTIME_SECRET_RECOVERY.md
+!deploy/api/tests/test_runtime_secret_safety.sh
 
 # IDE
 .idea/
@@ -44,3 +48,6 @@ build/
 Thumbs.db
 release/
 backend/dist/
+
+!deploy/api/m1-runtime-secret-discover.sh
+!deploy/api/m1-runtime-secret-restore.sh

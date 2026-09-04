@@ -116,6 +116,16 @@ bash deploy/api/m1-production-db-upgrade-recover.sh
 
 见 `deploy/api/PRODUCTION_DB_UPGRADE.md`（先 backup+verify，再 migration；禁止 seed；缺 JWT/VAULT 则启动 FAIL CLOSED）。
 
+库已在 `006` 且仅缺 runtime secret 时：**不要**再跑 upgrade 脚本。只读找回原值：
+
+```bash
+bash deploy/api/m1-runtime-secret-discover.sh
+# 仅当 READY_FOR_SECRET_RESTORE=YES：
+bash deploy/api/m1-runtime-secret-restore.sh
+```
+
+见 `deploy/api/RUNTIME_SECRET_RECOVERY.md`（禁止 invent secret；stdout 仅指纹；不覆盖 DATABASE_URL / GUOQIAO_SKIP_SEED / URL / CORS）。
+
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 
 根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。
