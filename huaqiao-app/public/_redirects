@@ -1,0 +1,2 @@
+# Cloudflare Pages：单页 H5 回退（本应用以 Tab 导航为主，无 vue-router；保留以兼容直链刷新）
+/*    /index.html   200
