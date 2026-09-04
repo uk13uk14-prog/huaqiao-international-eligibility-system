@@ -7,12 +7,15 @@ https://app.guoqiaoplan.com  (H5 Worker)
         ↓ HTTPS
 https://api.guoqiaoplan.com  (Cloudflare Tunnel)
         ↓
-M1 本机 Caddy / 反代 (127.0.0.1 only)
+M1 本机 Caddy 127.0.0.1:8088
         ↓
-SaaS Pro :8010  +  Free API :8000
+SaaS Pro 127.0.0.1:8010
         ↓
 现有 PostgreSQL / SQLite（不迁移、不公网暴露）
 ```
+
+生产 H5（`VITE_API_BASE` / `VITE_SAAS_API`）统一打到 `api.guoqiaoplan.com`，
+Caddy **全部**反代到 SaaS `:8010`。旧 Free `:8000` **不是**生产必需。
 
 ## 硬约束
 
@@ -94,14 +97,13 @@ Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel 必须在 M1 执
 若 API 尚未解析 / 未接通，在 M1 仓库根目录执行：
 
 ```bash
-# 0) 两端 CORS（重启 backend 生效；禁止 *）
+# 0) SaaS CORS（重启 backend 生效；禁止 *）
 # CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibility-system.rambolluk.workers.dev
 
-# 1) 确认本机后端
+# 1) 确认 SaaS 本机后端（:8000 Free 非必需）
 curl -sS http://127.0.0.1:8010/api/health
-curl -sS http://127.0.0.1:8000/api/health
 
-# 2) 一次性拉起 Caddy + Cloudflare Tunnel（会创建 DNS CNAME）
+# 2) 一次性拉起 Caddy(:8088→:8010) + Cloudflare Tunnel
 brew install caddy cloudflare/cloudflare/cloudflared   # 若未安装
 cloudflared login                                      # 仅首次
 bash deploy/api/m1-go-live.sh

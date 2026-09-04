@@ -1,19 +1,11 @@
-# 仅本机回环；由 Cloudflare Tunnel / Worker 上游接入。
-# 端口审计：SaaS :8010 · Free :8000
+# Production H5 API reverse proxy (loopback only).
+# Upstream: SaaS Pro on 127.0.0.1:8010
+# Free :8000 is NOT required for production H5 (VITE_API_BASE / VITE_SAAS_API → api.guoqiaoplan.com).
 
 {
 	auto_https off
 }
 
 :8088 {
-	# SaaS — 鉴权 / 学生档案 / 会员
-	@saas path /api/auth* /api/me* /api/students* /api/membership* /api/plans* /api/payments* /api/billing* /api/vault* /api/expert* /api/member* /api/assistant* /api/admin* /api/planning* /api/audit-logs*
-	handle @saas {
-		reverse_proxy 127.0.0.1:8010
-	}
-
-	# Free — 大学库 / 时间线 / 资格判定 / 法规 / 历史（完整目录数据）
-	handle {
-		reverse_proxy 127.0.0.1:8000
-	}
+	reverse_proxy 127.0.0.1:8010
 }

@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
 # ONE_SHOT: run ONCE on M1 from repo root after: git pull origin cursor/mobile-cloud-preview
-# Completes: Caddy :8088 + named Cloudflare Tunnel + DNS for api.guoqiaoplan.com
+# Completes: Caddy :8088 → SaaS :8010 + named Cloudflare Tunnel + DNS for api.guoqiaoplan.com
 # Does NOT expose Postgres/SSH/8010/8088 publicly. Does NOT touch CNber.
+# Does NOT require Free API :8000.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 TUNNEL_NAME="${TUNNEL_NAME:-guoqiao-api}"
 HOSTNAME="${HOSTNAME:-api.guoqiaoplan.com}"
 CADDY_ADDR="127.0.0.1:8088"
+SAAS_ADDR="127.0.0.1:8010"
 
-need() { command -v "$1" >/dev/null || { echo "MISSING:$1"; exit 1; }; }
-
-echo "==> Preflight backends"
-curl -fsS "http://127.0.0.1:8010/api/health" | tee /tmp/gq-saas.json
+echo "==> Preflight SaaS backend (:8010) — required"
+curl -fsS "http://${SAAS_ADDR}/api/health" | tee /tmp/gq-saas.json
 echo
-if ! curl -fsS "http://127.0.0.1:8000/api/health" >/tmp/gq-free.json; then
-  echo "WARN: Free API :8000 down (eligibility/history via free path). Continue with SaaS-only routes."
-else
-  cat /tmp/gq-free.json; echo
-fi
 
 echo "==> Ensure caddy + cloudflared"
 if ! command -v caddy >/dev/null; then
@@ -28,12 +23,29 @@ if ! command -v cloudflared >/dev/null; then
   if command -v brew >/dev/null; then brew install cloudflare/cloudflare/cloudflared; else echo "Install cloudflared first"; exit 1; fi
 fi
 
-echo "==> Caddy loopback reverse proxy"
+echo "==> Caddy loopback reverse proxy → SaaS :8010"
 caddy stop >/dev/null 2>&1 || true
 caddy start --config "$ROOT/deploy/api/Caddyfile" --adapter caddyfile
 sleep 1
-curl -fsS "http://${CADDY_ADDR}/api/health" | tee /tmp/gq-caddy.json
-echo
+
+echo "==> Local acceptance (must be 200 via Caddy, upstream SaaS)"
+code_saas="$(curl -sS -o /tmp/gq-saas-health.json -w '%{http_code}' "http://${SAAS_ADDR}/api/health")"
+code_caddy="$(curl -sS -o /tmp/gq-caddy.json -w '%{http_code}' "http://${CADDY_ADDR}/api/health")"
+echo "SAAS_HEALTH_HTTP=${code_saas}"
+echo "CADDY_HEALTH_HTTP=${code_caddy}"
+cat /tmp/gq-caddy.json; echo
+test "${code_saas}" = "200"
+test "${code_caddy}" = "200"
+
+# Non-502 smoke for key routes (401/403 OK when auth required)
+for path in /api/universities?target=international /api/schedules?target=international /api/students /api/records; do
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "http://${CADDY_ADDR}${path}")"
+  echo "CADDY ${path} -> ${code}"
+  case "${code}" in
+    200|401|403|422) ;;
+    *) echo "ERROR: unexpected status ${code} for ${path} (502 means wrong upstream)"; exit 1 ;;
+  esac
+done
 
 echo "==> Cloudflare named tunnel + DNS (browser login only if first time)"
 if ! cloudflared tunnel list 2>/dev/null | awk '{print $2}' | grep -qx "$TUNNEL_NAME"; then
