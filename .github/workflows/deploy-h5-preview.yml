@@ -59,16 +59,15 @@ jobs:
           print("bundle_ok", next(Path("huaqiao-app/dist/assets").glob("index-*.js")).name)
           PY
 
-      - name: Check Cloudflare secrets
+      # Account ID is public in this project; only the API token must be a secret.
+      - name: Check Cloudflare API token
         id: cf_secrets
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+          if [ -z "$CF_TOKEN" ]; then
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Missing GitHub secrets CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ACCOUNT_ID"
-            echo "Workers Builds (Cloudflare Git) remains the fallback auto-deploy path."
+            echo "::warning::Missing GitHub secret CLOUDFLARE_API_TOKEN"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
@@ -78,14 +77,14 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: f30a1943771feda448c8948c017464d6
           packageManager: npm
           command: deploy
 
-      - name: Fail when secrets missing (so deploy gap is visible)
+      - name: Fail when token missing
         if: steps.cf_secrets.outputs.present != 'true'
         run: |
           echo "SECRET_REQUIRED=YES"
-          echo "SECRET_NAMES=CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID"
-          echo "Add these as GitHub Actions secrets, or confirm Cloudflare Workers Builds deploys this branch."
+          echo "SECRET_NAMES=CLOUDFLARE_API_TOKEN"
+          echo "Add GitHub Actions secret CLOUDFLARE_API_TOKEN (Account → Workers Scripts Edit), then re-run this workflow."
           exit 1
