@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "003_r43_fix"
-down_revision = "002_privacy_encryption"
+down_revision = "002_privacy"
 branch_labels = None
 depends_on = None
 

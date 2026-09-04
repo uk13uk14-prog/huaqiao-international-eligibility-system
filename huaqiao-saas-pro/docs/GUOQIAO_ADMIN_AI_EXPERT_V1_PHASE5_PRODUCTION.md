@@ -83,6 +83,19 @@ Then on M1 / manually:
 
 ---
 
+## CI repair (2026-09-04 follow-up)
+
+Pre-existing CI reds on `cursor/mobile-cloud-preview` (via open PR → main):
+
+| Check | Root cause | Fix |
+|-------|------------|-----|
+| alembic-check | `postgresql+psycopg://` without `psycopg` package; free `003` down_revision mismatch; DB `huaqiao_free` missing | install `psycopg[binary]`; create DBs; fix `003` → `002_privacy`; also verify saas **007** |
+| backend-tests | no `pytest` / `httpx` installed | pip install in CI |
+| Deploy H5 | missing repo secret `CLOUDFLARE_API_TOKEN` | soft-warn (build still verified); manual/cloud deploy OK |
+| Workers Builds (CF) | Cloudflare Git build integration | out of band / secrets — not blocking M1 |
+
+---
+
 ## Absolute safety (still in force)
 
 | Guard | Status |
