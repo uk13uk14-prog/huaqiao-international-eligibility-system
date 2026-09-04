@@ -18,9 +18,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.services.membership_trial import (
+    SMART_TIMELINE_PLANS,
     TRIAL_DAYS,
     TRIAL_PLAN_CODE,
+    has_smart_timeline,
     is_paid,
+    is_pro,
     trial_info,
 )
 from app.services.permissions import FREE_LIMITS, entitlements, feature_summary
@@ -74,6 +77,7 @@ class TestNewUserTrial:
         assert user["is_pro"] is True
         assert user["trial_days_remaining"] == TRIAL_DAYS
         assert user["trial_ends_at"]
+        assert user["features"]["full_timeline_reminders"] is True
         # Server fields present on entitlements
         e = client.get("/api/membership/entitlements", headers=_auth(token))
         assert e.status_code == 200
@@ -81,6 +85,7 @@ class TestNewUserTrial:
         assert ej["trial_active"] is True
         assert ej["university_limit"] == 999
         assert ej["is_pro"] is True
+        assert ej["features"]["full_timeline_reminders"] is True
 
 
 class TestTrialFullAccess:
@@ -289,3 +294,97 @@ class TestClientCannotExtendTrial:
         assert e.status_code == 200
         # Still server-derived remaining ≤ 7
         assert e.json()["trial_days_remaining"] <= TRIAL_DAYS
+
+
+def _user(**kwargs):
+    defaults = {
+        "plan_code": "free",
+        "membership_until": None,
+        "created_at": None,
+        "student_profile_limit_override": None,
+    }
+    defaults.update(kwargs)
+    return type("U", (), defaults)()
+
+
+class TestTrialSmartTimeline:
+    """ACTIVE_TRIAL_SMART_TIMELINE / EXPIRED_TRIAL_SMART_TIMELINE / ACTIVE_PRO_TIMELINE."""
+
+    def test_active_trial_smart_timeline_pass(self):
+        u = _user(
+            plan_code=TRIAL_PLAN_CODE,
+            membership_until=datetime.utcnow() + timedelta(days=7),
+        )
+        assert is_paid(u) is True
+        assert has_smart_timeline(u) is True
+        assert feature_summary(u)["full_timeline_reminders"] is True
+        # Must NOT rely on static allow-list membership for trial
+        assert TRIAL_PLAN_CODE not in SMART_TIMELINE_PLANS
+
+    def test_expired_trial_smart_timeline_denied(self):
+        u = _user(
+            plan_code=TRIAL_PLAN_CODE,
+            membership_until=datetime.utcnow() - timedelta(days=1),
+        )
+        assert is_paid(u) is False
+        assert has_smart_timeline(u) is False
+        assert feature_summary(u)["full_timeline_reminders"] is False
+
+    def test_active_pro_timeline_unchanged(self):
+        # Year+ Pro still has timeline
+        year = _user(plan_code="vip_year", membership_until=datetime.utcnow() + timedelta(days=30))
+        assert has_smart_timeline(year) is True
+        life = _user(plan_code="lifetime", membership_until=None)
+        assert has_smart_timeline(life) is True
+        # Month VIP unchanged: still no smart timeline (not in SMART_TIMELINE_PLANS)
+        month = _user(plan_code="vip_month", membership_until=datetime.utcnow() + timedelta(days=30))
+        assert is_paid(month) is True
+        assert has_smart_timeline(month) is False
+        assert "vip_month" not in SMART_TIMELINE_PLANS
+
+
+class TestIsProSemantics:
+    """is_pro = full paid entitlement alias (current commercial model)."""
+
+    def test_free_is_pro_false(self):
+        u = _user(plan_code="free", membership_until=None)
+        assert is_pro(u) is False
+        assert is_paid(u) is False
+        assert feature_summary(u)["is_pro"] is False
+
+    def test_active_trial_is_pro_true(self):
+        u = _user(
+            plan_code=TRIAL_PLAN_CODE,
+            membership_until=datetime.utcnow() + timedelta(days=3),
+        )
+        assert is_pro(u) is True
+        assert is_paid(u) is True
+        assert feature_summary(u)["is_pro"] is True
+
+    def test_expired_trial_is_pro_false(self):
+        u = _user(
+            plan_code=TRIAL_PLAN_CODE,
+            membership_until=datetime.utcnow() - timedelta(hours=1),
+        )
+        assert is_pro(u) is False
+        assert is_paid(u) is False
+
+    def test_paid_pro_is_pro_true(self):
+        for code in ("vip_month", "vip_year", "vip_three_year", "lifetime", "pro_yearly"):
+            u = _user(
+                plan_code=code,
+                membership_until=None if code == "lifetime" else datetime.utcnow() + timedelta(days=10),
+            )
+            assert is_pro(u) is True, code
+            assert is_paid(u) is True, code
+
+    def test_legacy_vip_not_downgraded(self):
+        for code in ("vip_month", "vip_year", "vip_three_year", "lifetime"):
+            u = _user(plan_code=code, membership_until=None)
+            assert is_paid(u) is True, code
+            assert is_pro(u) is True, code
+            # Year+/lifetime keep timeline; month unchanged without timeline
+            if code == "vip_month":
+                assert has_smart_timeline(u) is False
+            else:
+                assert has_smart_timeline(u) is True

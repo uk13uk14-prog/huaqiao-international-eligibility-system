@@ -180,7 +180,7 @@ def seed_data(db: Session):
                 "full_library": code not in {"free"},
                 "report_export": code not in {"free"},
                 "one_on_one_expert": code not in {"free"},
-                "smart_timeline": code in {"vip_year", "vip_three_year", "yearly", "lifetime"},
+                "smart_timeline": code in {"vip_year", "vip_three_year", "yearly", "lifetime", "pro_trial"},
                 "pro_trial": code == "pro_trial",
             },
             ensure_ascii=False,

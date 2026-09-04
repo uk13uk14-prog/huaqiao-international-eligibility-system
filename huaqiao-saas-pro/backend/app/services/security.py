@@ -16,6 +16,7 @@ from .membership_trial import (
     VIP_PAID_PLANS,
     has_smart_timeline,
     is_paid,
+    is_pro,
     trial_info,
 )
 

@@ -9,9 +9,9 @@
 | Schema migration | **不需要** — 复用 `users.plan_code` + `users.membership_until` |
 | Trial plan code | `pro_trial` |
 | Trial 时长 | `TRIAL_DAYS=7`（服务端 `utcnow`） |
-| Trial ACTIVE | `is_paid=True` → 与当前 Pro 相同 entitlement |
-| Trial EXPIRED | `is_paid=False` → Free limits（`university_limit=8` + `is_core=False` → 现网约 3 所） |
-| 老用户 | 不自动改写；`free` 保持 free；`vip_*` + `membership_until=NULL` 视为在期保护 |
+| Trial ACTIVE | `is_paid=True` / `is_pro=True` → 与当前 Pro 相同核心 entitlement；**含完整智能时间轴**（经 `is_paid` 门控，不把 `pro_trial` 永久写入静态 SMART_TIMELINE_PLANS） |
+| Trial EXPIRED | `is_paid=False` / `is_pro=False` → Free limits；时间轴关闭；数据保留 |
+| `is_pro` | **full paid entitlement alias**（当前商业模型下与 `is_paid` 同义；见 `membership_trial.is_pro` 注释） |
 
 ## 关键文件
 

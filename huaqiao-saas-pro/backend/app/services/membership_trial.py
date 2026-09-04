@@ -26,6 +26,9 @@ LEGACY_TEST_PAID_PLANS = {
     "pro_plus_yearly",
 }
 LIFETIME_PLANS = {"lifetime"}
+# Year+ / lifetime / legacy yearly SKUs — static plan allow-list ONLY.
+# Do NOT put pro_trial here: trial timeline is granted via is_paid()+trial plan
+# so expiry (membership_until) always revokes it.
 SMART_TIMELINE_PLANS = {
     "vip_year",
     "vip_three_year",
@@ -95,11 +98,38 @@ def is_paid(user, *, now: datetime | None = None) -> bool:
     return until > now
 
 
+def is_pro(user, *, now: datetime | None = None) -> bool:
+    """Full Pro entitlement alias for the current commercial model.
+
+    Product today treats every *active* paid SKU as full Pro software access
+    (library / planning / vault / expert / seats): vip_month, vip_year,
+    vip_three_year, lifetime, legacy pro_*, and *active* pro_trial.
+
+    Therefore ``is_pro`` == ``is_paid`` (server-side membership_until / plan).
+    It is NOT a separate SKU and must not stay true after trial/paid expiry.
+    Prefer exposing both ``paid`` and ``is_pro`` plus ``trial_*`` fields so
+    clients can show trial UX without inventing entitlement locally.
+    """
+    return is_paid(user, now=now)
+
+
 def has_smart_timeline(user, *, now: datetime | None = None) -> bool:
-    """Year+ / lifetime style timeline reminders (not month trial)."""
+    """Smart timeline / full timeline reminders entitlement.
+
+    - Always requires ``is_paid`` (server expiry) first.
+    - Active ``pro_trial``: full Pro timeline for the trial window only
+      (trial entitlement == current Pro software entitlement). ``pro_trial``
+      is intentionally NOT listed in ``SMART_TIMELINE_PLANS`` so an expired
+      trial cannot keep timeline via a static allow-list.
+    - Non-trial paid SKUs: unchanged year+/lifetime allow-list
+      (``SMART_TIMELINE_PLANS``); vip_month etc. stay as before.
+    """
     if not is_paid(user, now=now):
         return False
-    return _code(user) in SMART_TIMELINE_PLANS
+    code = _code(user)
+    if code == TRIAL_PLAN_CODE:
+        return True
+    return code in SMART_TIMELINE_PLANS
 
 
 def trial_info(user, *, now: datetime | None = None) -> dict[str, Any]:
@@ -118,7 +148,7 @@ def trial_info(user, *, now: datetime | None = None) -> dict[str, Any]:
                 "trial_started_at": None,
                 "trial_ends_at": until.isoformat() if until else None,
                 "trial_days_remaining": None,
-                "is_pro": True,
+                "is_pro": True,  # full paid entitlement alias
             }
         return {
             "trial_status": "NONE",
@@ -150,5 +180,6 @@ def trial_info(user, *, now: datetime | None = None) -> dict[str, Any]:
         "trial_started_at": started.isoformat() if started else None,
         "trial_ends_at": until.isoformat() if until else None,
         "trial_days_remaining": days_remaining if active else 0,
+        # Active trial only — expiry flips is_pro via membership_until
         "is_pro": active,
     }

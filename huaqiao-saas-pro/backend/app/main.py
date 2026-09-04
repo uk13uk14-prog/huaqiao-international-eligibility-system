@@ -54,7 +54,7 @@ from .services.recommend import recommend
 from .services.eligibility_engine import evaluate_international_student, evaluate_overseas_chinese_student, InternationalStudentInput, OverseasChineseStudentInput
 from .services.rules import judge_huaqiao, judge_international  # DEPRECATED: kept for backward compat, not used for final policy decision
 from .services.eligibility_engine import evaluate_overseas_chinese_student, evaluate_international_student
-from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, require_admin, verify_password, trial_info
+from .services.security import create_token, get_current_user, get_current_user_optional, hash_password, is_paid, is_pro, require_admin, verify_password, trial_info
 from .services.membership_trial import grant_new_user_pro_trial
 from .services.vault_crypto import decrypt_profile_json, encrypt_profile_json
 from .services.privacy import redact_log_message, AuditLogger, AuditAction
@@ -218,7 +218,7 @@ def membership_entitlements(user: User = Depends(get_current_user), db: Session 
         "plan_code": user.plan_code,
         "plan": user.plan_code,
         "paid": is_paid(user),
-        "is_pro": is_paid(user),
+        "is_pro": is_pro(user),
         "trial_status": trial["trial_status"],
         "trial_active": trial["trial_active"],
         "trial_started_at": trial["trial_started_at"],

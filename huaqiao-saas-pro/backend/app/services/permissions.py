@@ -1,4 +1,4 @@
-from .security import has_smart_timeline, is_paid, trial_info
+from .security import has_smart_timeline, is_paid, is_pro, trial_info
 from .student_profile_entitlements import (
     FREE_STUDENT_PROFILE_LIMIT,
     PRO_STUDENT_PROFILE_LIMIT,
@@ -35,13 +35,15 @@ def entitlements(user, db=None):
 
 def feature_summary(user, db=None):
     paid = is_paid(user)
+    # is_pro = full paid entitlement alias (see membership_trial.is_pro docstring)
+    pro = is_pro(user)
     smart_timeline = has_smart_timeline(user)
     trial = trial_info(user)
     summary = {
         "plan_code": user.plan_code,
         "plan": user.plan_code,
         "paid": paid,
-        "is_pro": paid,
+        "is_pro": pro,
         "membership_until": user.membership_until.isoformat() if user.membership_until else None,
         "trial_status": trial["trial_status"],
         "trial_active": trial["trial_active"],
