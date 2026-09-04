@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "国际生资格智评系统 SaaS Pro"
     env: str = "development"
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./saas_pro.db")
-    cors_origins: str = "http://localhost:5180,http://127.0.0.1:5180,http://localhost:5174,http://127.0.0.1:5174"
+    cors_origins: str = "http://localhost:5180,http://127.0.0.1:5180,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5190,http://127.0.0.1:5190"
     jwt_secret_key: str = "change-me-in-production"
     vault_fernet_key: str = ""
     admin_token: str = ""

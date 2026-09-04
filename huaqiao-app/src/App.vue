@@ -335,6 +335,55 @@
         </van-cell-group>
         <van-empty v-else-if="saasUser" description="开通会员后可提交专家工单" />
 
+        <van-divider>专家规划</van-divider>
+        <van-cell-group v-if="saasUser && currentStudentId" inset>
+          <van-cell
+            v-for="p in publishedPlans"
+            :key="p.id"
+            :title="planTitle(p)"
+            :label="planSubtitle(p)"
+            is-link
+            @click="openPublishedPlan(p)"
+          >
+            <template #value>
+              <van-tag type="success">已发布</van-tag>
+            </template>
+          </van-cell>
+          <van-empty v-if="!publishedPlans.length" description="暂无已发布的专家规划" />
+        </van-cell-group>
+        <van-empty v-else-if="saasUser && !currentStudentId" description="请先选择学生档案后查看专家规划" />
+
+        <van-popup v-model:show="publishedPlanShow" round position="bottom" :style="{ height: '75%' }">
+          <div class="consult-sheet" v-if="publishedPlanDetail">
+            <h3>{{ planTitle(publishedPlanDetail) }}</h3>
+            <p class="gq-muted">状态：已发布 · {{ publishedPlanDetail.published_at || '—' }}</p>
+            <van-divider>摘要</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.summary || '—' }}</p>
+            <van-divider>风险点</van-divider>
+            <ul v-if="(publishedPlanDetail.risk_items || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.risk_items" :key="'r'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>选校策略</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.school_strategy || '—' }}</p>
+            <van-divider>材料缺口</van-divider>
+            <ul v-if="(publishedPlanDetail.material_gaps || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.material_gaps" :key="'g'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>时间行动</van-divider>
+            <ul v-if="(publishedPlanDetail.timeline_actions || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.timeline_actions" :key="'t'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>家长沟通要点</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.parent_message || '—' }}</p>
+            <van-divider>正文</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.content || '—' }}</p>
+            <van-button block round style="margin-top:12px" @click="publishedPlanShow = false">关闭</van-button>
+          </div>
+        </van-popup>
+
         <van-divider v-if="saasUser?.features?.full_timeline_reminders">升学节点提醒</van-divider>
         <van-cell-group v-if="saasUser?.features?.full_timeline_reminders" inset>
           <van-cell v-for="r in reminderList" :key="r.id" :title="r.title" :label="new Date(r.remind_at).toLocaleString() + ' · ' + r.category" />
@@ -521,6 +570,9 @@ const vaultJson = ref(vaultDefaults())
 const vaultSaving = ref(false)
 const expertForm = ref({ title: '', question: '', personalization: '', contact_phone: '', contact_email: '', contact_wechat: '' })
 const expertList = ref([])
+const publishedPlans = ref([])
+const publishedPlanShow = ref(false)
+const publishedPlanDetail = ref(null)
 const expertSubmitting = ref(false)
 const expertDetailShow = ref(false)
 const expertDetail = ref(null)
@@ -589,6 +641,7 @@ function onHomePickStudent(payload) {
   if (accessibleStudents.value.length !== beforeCount) {
     refreshStudentSwitcher()
   }
+  loadPublishedPlans()
 }
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
@@ -752,6 +805,7 @@ async function doSaasLogin() {
     await refreshStudentSwitcher()
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -767,6 +821,9 @@ function doSaasLogout() {
   saasUser.value = null
   clearActiveStudent()
   expertList.value = []
+  publishedPlans.value = []
+  publishedPlanDetail.value = null
+  publishedPlanShow.value = false
   reminderList.value = []
 }
 
@@ -783,6 +840,7 @@ async function buySaasPlan(plan_code) {
     showSuccessToast('已开通（模拟支付）')
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -811,6 +869,7 @@ async function doRedeem() {
     redeemCode.value = ''
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -867,6 +926,42 @@ async function loadExpertList() {
   } catch {
     expertList.value = []
   }
+}
+
+async function loadPublishedPlans() {
+  publishedPlans.value = []
+  if (!getSaasToken() || !currentStudentId.value) return
+  try {
+    const r = await saasApi.publishedConsultations(currentStudentId.value)
+    publishedPlans.value = (r.consultations || []).filter((c) => c.status === 'PUBLISHED')
+  } catch {
+    publishedPlans.value = []
+  }
+}
+
+function planTitle(p) {
+  if (!p) return '专家规划'
+  const kindMap = {
+    student_portrait: '学生画像',
+    eligibility_risk: '资格风险分析',
+    school_recommendation: '选校建议',
+    material_gaps: '材料缺口',
+    timeline_plan: '时间规划',
+    parent_report: '家长沟通报告',
+    one_on_one_draft: '一对一规划',
+  }
+  return p.title || kindMap[p.report_kind] || p.report_kind || '专家规划'
+}
+
+function planSubtitle(p) {
+  const when = p.published_at ? new Date(p.published_at).toLocaleString() : ''
+  const summary = (p.summary || '').slice(0, 48)
+  return [when, summary].filter(Boolean).join(' · ')
+}
+
+function openPublishedPlan(p) {
+  publishedPlanDetail.value = p
+  publishedPlanShow.value = true
 }
 
 async function loadReminders() {
@@ -1093,6 +1188,7 @@ async function onTabChange(name = tab.value) {
     await refreshSaasUser()
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
   }
   if (name === 'laws') {

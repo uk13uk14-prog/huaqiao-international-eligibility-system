@@ -374,6 +374,30 @@ def eligibility_writeback(
     return _payload(row, profile, db)
 
 
+@router.get("/{student_id}/published-consultations")
+def published_consultations(
+    student_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Owner-only: return PUBLISHED consultations for this student_id.
+
+    Never returns drafts, admin notes, provider secrets, or other students' data.
+    """
+    row = _owned(db, user, student_id)
+    from .services.admin_ai_expert import list_published_for_owner
+
+    items = list_published_for_owner(db, student_id=row.id, user_id=user.id)
+    # Defense in depth
+    for item in items:
+        assert item.get("status") == "PUBLISHED"
+        assert item.get("student_id") == row.id
+        assert "admin_note" not in item
+        assert "ai_provider" not in item
+        assert "cipher_blob" not in item
+    return {"student_id": row.id, "consultations": items}
+
+
 @router.get("/{student_id}/portrait")
 def get_portrait(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     row = _owned(db, user, student_id)
