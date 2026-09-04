@@ -273,3 +273,76 @@ class MemberTimelineReminder(Base):
     admin_note = Column(Text, default="")
     created_by_role = Column(String(20), default="system")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
+# ---------------------------------------------------------------------------
+# Notification Center V1
+# ---------------------------------------------------------------------------
+
+class Notification(Base):
+    """Unified in-app notification (student + admin). Push is provider-abstracted."""
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    recipient_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    recipient_role = Column(String(30), nullable=False, index=True)  # STUDENT_SIDE | ADMIN_SIDE
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    category = Column(String(40), default="timeline", index=True)
+    event_type = Column(String(60), nullable=False, index=True)
+    title = Column(String(240), nullable=False, default="")
+    body = Column(Text, default="")
+    source_type = Column(String(40), default="")
+    source_id = Column(String(120), default="")
+    scheduled_at = Column(DateTime, index=True, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    read_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="SCHEDULED", index=True)
+    priority = Column(String(20), default="NORMAL", index=True)  # LOW|NORMAL|HIGH|CRITICAL
+    action_url = Column(String(400), default="")
+    action_label = Column(String(80), default="")
+    dedupe_key = Column(String(240), default="", index=True)
+    popup_shown_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NotificationRule(Base):
+    __tablename__ = "notification_rules"
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(60), nullable=False, index=True)
+    days_before = Column(Integer, nullable=True)
+    hours_before = Column(Integer, nullable=True)
+    enabled = Column(Boolean, default=True, index=True)
+    recipient_type = Column(String(30), nullable=False, default="STUDENT_SIDE", index=True)
+    priority = Column(String(20), default="NORMAL")
+    title_template = Column(String(240), default="")
+    body_template = Column(Text, default="")
+    category = Column(String(40), default="timeline")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificationDevice(Base):
+    __tablename__ = "notification_devices"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    device_type = Column(String(40), default="web")
+    platform = Column(String(40), default="")
+    push_provider = Column(String(20), default="IN_APP")
+    push_token_encrypted = Column(Text, default="")
+    enabled = Column(Boolean, default=True, index=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    timeline_enabled = Column(Boolean, default=True)
+    expert_enabled = Column(Boolean, default=True)
+    account_enabled = Column(Boolean, default=True)
+    quiet_hours_start = Column(String(8), default="22:00")
+    quiet_hours_end = Column(String(8), default="08:00")
+    timezone = Column(String(64), default="Asia/Shanghai")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -21,6 +21,7 @@ from .models import (
     User,
 )
 from .services import admin_ai_expert as ai
+from .services import notifications as notif
 from .services import admin_audit
 from .services.admin_privacy import public_student_meta, redact_profile_for_admin
 from .services.admin_rbac import (
@@ -554,6 +555,10 @@ async def create_ai_draft(
         student_id=student_id,
         metadata={"report_kind": body.report_kind, "status": draft["status"], "provider": draft.get("ai_provider")},
     )
+    try:
+        notif.notify_admins_ai_review_required(db, student=row, draft=draft, actor=admin)
+    except Exception:
+        pass  # notification failure must not block AI draft creation
     return {
         "student_id": student_id,
         "draft": draft,
@@ -650,6 +655,11 @@ def publish_ai_draft(
         student_id=student_id,
         metadata={"status": updated["status"]},
     )
+    try:
+        student = _get_student_or_404(db, student_id)
+        notif.notify_student_report_published(db, student=student, draft=updated)
+    except Exception:
+        pass
     return {"student_id": student_id, "draft": updated}
 
 

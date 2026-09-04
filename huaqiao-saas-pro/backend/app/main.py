@@ -68,8 +68,10 @@ audit_logger = AuditLogger()
 app = FastAPI(title=settings.app_name, version="1.0.0", description="国际生资格智评系统 SaaS Pro API")
 from .student_api import router as student_router
 from .admin_v1_api import router as admin_v1_router
+from .notification_api import router as notification_router
 app.include_router(student_router)
 app.include_router(admin_v1_router)
+app.include_router(notification_router)
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)

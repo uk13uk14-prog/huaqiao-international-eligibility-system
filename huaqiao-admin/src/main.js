@@ -4,5 +4,11 @@ import 'element-plus/dist/index.css'
 import App from './App.vue'
 import router from './router'
 import './styles/admin.css'
+import { installSessionGuard } from './composables/useSessionGuard'
 
-createApp(App).use(router).use(ElementPlus).mount('#app')
+const app = createApp(App)
+app.use(router)
+app.use(ElementPlus)
+app.mount('#app')
+
+installSessionGuard()
