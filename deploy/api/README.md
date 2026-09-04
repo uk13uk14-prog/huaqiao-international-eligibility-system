@@ -100,14 +100,18 @@ Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel 必须在 M1 执
 # 0) SaaS CORS（重启 backend 生效；禁止 *）
 # CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibility-system.rambolluk.workers.dev
 
-# 1) 确认 SaaS 本机后端（:8000 Free 非必需）
+# 1) 确认 SaaS 本机后端（:8000 Free 非必需）；须为当前 HEAD 进程（含 student_api）
 curl -sS http://127.0.0.1:8010/api/health
+curl -sS http://127.0.0.1:8010/api/students
+# 期望：401 {"detail":"请先登录"} —— 若 404，请重启 uvicorn 加载当前分支的 student_api
 
 # 2) 一次性拉起 Caddy(:8088→:8010) + Cloudflare Tunnel
 brew install caddy cloudflare/cloudflare/cloudflared   # 若未安装
 cloudflared login                                      # 仅首次
 bash deploy/api/m1-go-live.sh
 ```
+
+路径对齐见 `deploy/api/ENDPOINT_MATRIX.md`。
 
 验证：
 
