@@ -5,19 +5,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC"
 html.dark body { background: #0b1120; }
 .mobile-app.dark { background: #0b1120; color: #e2e8f0; --van-background: #0b1120; --van-background-2: #1e293b; --van-text-color: #e2e8f0; --van-text-color-2: #94a3b8; --van-border-color: #475569; --van-cell-background: #1e293b; --van-field-input-text-color: #f1f5f9; --van-nav-bar-background: #1e293b; }
 .screen { min-height: calc(100vh - 100px); padding: 14px 12px 22px; }
-.hero-card { color: white; border-radius: 24px; padding: 24px 20px; background: linear-gradient(135deg, #123c69, #2563eb); box-shadow: 0 16px 36px rgba(37, 99, 235, .24); margin-bottom: 14px; }
+.hero-card {
+  color: white;
+  border-radius: 24px;
+  padding: 24px 20px;
+  background: linear-gradient(135deg, #123c69, #2563eb);
+  box-shadow: 0 16px 36px rgba(37, 99, 235, .24);
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
 .hero-title {
-  margin: 10px 0 6px;
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.18em;
   font-size: clamp(22px, 6vw, 28px);
   line-height: 1.28;
   font-weight: 700;
-  text-align: left;
+  text-align: center;
   word-break: keep-all;
   overflow-wrap: normal;
 }
 .hero-title-line {
   display: block;
-  text-align: left;
+  width: auto;
+  max-width: 100%;
+  text-align: center;
   margin: 0;
   padding: 0;
   text-indent: 0;
@@ -30,12 +50,21 @@ html.dark body { background: #0b1120; }
 .hero-title-line--secondary {
   color: #ffffff;
   font-size: 1em;
-  margin-top: 0.12em;
 }
-.hero-lead { margin: 0; opacity: .88; line-height: 1.6; font-size: 15px; }
+.hero-lead {
+  margin: 0;
+  width: 100%;
+  max-width: 100%;
+  text-align: center;
+  opacity: .88;
+  line-height: 1.6;
+  font-size: 15px;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
 
 @media (max-width: 430px) {
-  .hero-card { padding: 22px 16px; }
+  .hero-card { padding: 22px 16px; gap: 8px; }
   .hero-title {
     font-size: clamp(22px, 6vw, 26px);
     line-height: 1.3;
