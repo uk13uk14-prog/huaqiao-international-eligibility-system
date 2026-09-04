@@ -36,6 +36,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, ApiError, setToken, clearToken } from '../api/client'
+import { isMobileViewport } from '../composables/useIsMobile'
 
 const router = useRouter()
 const email = ref('')
@@ -56,7 +57,7 @@ async function onLogin() {
       clearToken()
       throw new ApiError('当前账号无权进入运营后台', { status: 403, code: 'no_console_role' })
     }
-    await router.replace('/dashboard')
+    await router.replace(isMobileViewport() ? '/m/home' : '/dashboard')
   } catch (e) {
     clearToken()
     if (e instanceof ApiError) {
