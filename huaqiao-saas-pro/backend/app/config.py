@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     alipay_public_key: str = ""
     # R4.3 Privacy settings
     privacy_hmac_secret: str = ""  # For blind index (searchable encryption)
+    # Production recovery: skip seed_data on startup (deploy scripts set GUOQIAO_SKIP_SEED=1).
+    # Default False preserves normal dev/test seed behavior.
+    guoqiao_skip_seed: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig")
 

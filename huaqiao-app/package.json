@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "wrangler": "^4.129.0"
   }
 }

@@ -1,0 +1,90 @@
+name: Deploy H5 Preview
+
+on:
+  push:
+    branches:
+      - cursor/mobile-cloud-preview
+    paths:
+      - "huaqiao-app/**"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy-h5-preview.yml"
+      - "scripts/cf-build-h5.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: h5-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy H5 static Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            huaqiao-app/package-lock.json
+
+      - name: Install root (wrangler)
+        run: npm install
+
+      # Vite loads huaqiao-app/.env.production (https://api.guoqiaoplan.com).
+      # Do not inject empty VITE_* from unset GitHub vars — that overrides .env.production.
+      - name: Build huaqiao-app
+        run: npm run build:h5
+
+      - name: Verify dist embeds production API
+        run: |
+          test -f huaqiao-app/dist/index.html
+          test -d huaqiao-app/dist/assets
+          ls -la huaqiao-app/dist huaqiao-app/dist/assets
+          python3 - <<'PY'
+          from pathlib import Path
+          js = next(Path("huaqiao-app/dist/assets").glob("index-*.js")).read_text(encoding="utf-8", errors="ignore")
+          assert "https://api.guoqiaoplan.com" in js, "production API origin missing from bundle"
+          for bad in ("127.0.0.1", "localhost", "100.97.", "192.168."):
+              assert bad not in js, f"private URL leaked: {bad}"
+          print("bundle_ok", next(Path("huaqiao-app/dist/assets").glob("index-*.js")).name)
+          PY
+
+      # Account ID is public in this project; only the API token must be a secret.
+      - name: Check Cloudflare API token
+        id: cf_secrets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CF_TOKEN" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Missing GitHub secret CLOUDFLARE_API_TOKEN"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Cloudflare Workers (static assets)
+        if: steps.cf_secrets.outputs.present == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: f30a1943771feda448c8948c017464d6
+          packageManager: npm
+          command: deploy
+
+      - name: Fail when token missing
+        if: steps.cf_secrets.outputs.present != 'true'
+        run: |
+          echo "SECRET_REQUIRED=YES"
+          echo "SECRET_NAMES=CLOUDFLARE_API_TOKEN"
+          echo "Add GitHub Actions secret CLOUDFLARE_API_TOKEN (Account → Workers Scripts Edit), then re-run this workflow."
+          exit 1

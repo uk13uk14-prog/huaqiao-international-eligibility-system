@@ -15,26 +15,32 @@
 
     <main class="screen" @touchstart="touchStart" @touchend="touchEnd">
       <section v-if="tab === 'home'" class="home-screen">
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <div class="hero-card">
-          <h1>国际生/华侨生资格判定系统</h1>
+          <h1 class="hero-title">
+            <span class="hero-title-line hero-title-line--primary">国际生/华侨生</span>
+            <span class="hero-title-line hero-title-line--secondary">资格判定系统</span>
+          </h1>
           <p class="hero-lead">欢迎使用</p>
         </div>
-        <van-cell-group v-if="accessibleStudents.length" inset class="home-student-switch">
-          <van-cell title="当前学生" :value="activeStudentLabel" />
+        <van-cell-group v-if="studentSwitcherList.length" inset class="home-student-switch">
+          <van-cell title="当前学生" :value="currentStudentLabel" />
           <van-field
-            v-if="hasMultipleStudents"
+            v-if="studentSwitcherList.length > 1"
             label="切换"
             is-link
             readonly
-            :model-value="activeStudentLabel"
+            :model-value="currentStudentLabel"
             placeholder="选择学生"
-            @click="showHomeStudentPicker = true"
+            @click="openHomeStudentPicker"
           />
         </van-cell-group>
-        <van-popup v-model:show="showHomeStudentPicker" position="bottom">
+        <van-popup v-model:show="showHomeStudentPicker" position="bottom" round>
           <van-picker
+            v-if="showHomeStudentPicker"
+            :key="`home-picker-${currentStudentId || 'none'}-${pickerEpoch}`"
             :columns="homeStudentColumns"
-            :default-index="homePickerDefaultIndex"
+            :model-value="homePickerSelectedValues"
             @confirm="onHomePickStudent"
             @cancel="showHomeStudentPicker=false"
           />
@@ -238,6 +244,7 @@
       </section>
 
       <section v-if="tab === 'schedule'" class="list-screen">
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <van-dropdown-menu>
           <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
           <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
@@ -269,18 +276,26 @@
       </section>
 
       <section v-if="tab === 'member'" class="list-screen member-screen">
-        <van-cell-group v-if="!saasUser" inset title="登录 SaaS 会员">
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
+        <van-cell-group v-if="!saasUser" inset title="登录 / 注册 SaaS 会员">
           <van-field v-model="loginEmail" label="邮箱" placeholder="注册邮箱" />
           <van-field v-model="loginPassword" type="password" label="密码" placeholder="密码" />
           <div class="consult-actions" style="padding:12px;">
             <van-button block round type="primary" :loading="saasBusy" @click="doSaasLogin">登录</van-button>
+            <van-button block round plain type="primary" style="margin-top:8px;" :loading="saasBusy" @click="doSaasRegister">注册并开启 7 天 Pro 体验</van-button>
           </div>
         </van-cell-group>
         <van-cell-group v-else inset :title="'您好，' + (saasUser.name || saasUser.email)">
           <van-cell title="当前套餐" :value="saasUser.plan_code + (saasUser.paid ? '（在期）' : '')" />
+          <van-cell v-if="saasUser.trial_active" title="Pro 体验" :value="'剩余 ' + (saasUser.trial_days_remaining ?? '—') + ' 天'" />
+          <van-cell v-else-if="saasUser.trial_status === 'EXPIRED'" title="体验状态" value="已结束 · 数据已保留" />
           <van-cell title="全量院校库" :value="saasUser.features?.full_elite_university_library ? '已开通' : '未开通'" />
           <van-cell title="专家咨询" :value="saasUser.features?.one_on_one_expert ? '已开通' : '未开通'" />
           <van-cell title="智能时间轴" :value="saasUser.features?.full_timeline_reminders ? '已开通' : '年/三年会员'" />
+          <div v-if="saasUser.trial_status === 'EXPIRED'" class="consult-actions" style="padding:12px;">
+            <p class="trial-expired-copy">7 天完整体验已结束。你的学生档案和规划数据已安全保留。</p>
+            <van-button block round type="primary" @click="scrollToPlans">升级 Pro，继续查看完整规划</van-button>
+          </div>
           <div class="consult-actions" style="padding:12px;">
             <van-button block round type="danger" @click="doSaasLogout">退出登录</van-button>
           </div>
@@ -386,9 +401,9 @@ import {
   activeStudentId,
   activeStudentLabel,
   clearActiveStudent,
-  hasMultipleStudents,
   normalizeStudentId,
   setActiveStudentId,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import { api } from './api'
@@ -446,6 +461,59 @@ const loginEmail = ref('')
 const loginPassword = ref('')
 const saasBusy = ref(false)
 const redeemCode = ref('')
+
+/** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
+const trialBannerText = computed(() => {
+  const u = saasUser.value
+  if (!u) return ''
+  if (u.trial_active) {
+    const d = u.trial_days_remaining
+    if (d === 1) return 'Pro 体验明天结束'
+    if (typeof d === 'number' && d > 0) return `Pro 完整体验 · 剩余 ${d} 天`
+    return 'Pro 完整体验进行中'
+  }
+  if (u.trial_status === 'EXPIRED') return '完整体验已结束 · 升级 Pro'
+  return ''
+})
+const trialBannerClass = computed(() => {
+  const u = saasUser.value
+  if (!u) return ''
+  if (u.trial_status === 'EXPIRED') return 'trial-badge--expired'
+  if (u.trial_days_remaining === 1) return 'trial-badge--urgent'
+  return 'trial-badge--active'
+})
+
+function scrollToPlans() {
+  // Keep user on member tab; plans cells are below
+  tab.value = 'member'
+}
+
+async function doSaasRegister() {
+  if (!loginEmail.value || !loginPassword.value) {
+    showFailToast('请填写邮箱和密码')
+    return
+  }
+  saasBusy.value = true
+  try {
+    const r = await saasApi.register({
+      tenant_name: loginEmail.value.split('@')[0] || '个人用户',
+      tenant_type: 'personal',
+      email: loginEmail.value,
+      password: loginPassword.value,
+      name: loginEmail.value.split('@')[0] || '用户',
+    })
+    setSaasToken(r.token)
+    saasUser.value = r.user
+    showSuccessToast('已开启 7 天 Pro 完整体验')
+    await refreshStudentSwitcher()
+    await loadUniversities()
+    await loadSchedules()
+  } catch (error) {
+    showFailToast(error.message || '注册失败')
+  } finally {
+    saasBusy.value = false
+  }
+}
 function vaultDefaults() {
   return { family_note: '', child_identity: '', residence_note: '', goal_note: '', intended_major: '', target_schools: '' }
 }
@@ -460,13 +528,17 @@ const expertDetailLoading = ref(false)
 const reminderList = ref([])
 const profileStudentId = activeStudentId
 const showHomeStudentPicker = ref(false)
-const homeStudentColumns = computed(() => accessibleStudents.value.map(s => ({
+const pickerEpoch = ref(0)
+const studentSwitcherList = computed(() => accessibleStudents.value.slice())
+const currentStudentId = computed(() => normalizeStudentId(activeStudentId.value))
+const currentStudentLabel = computed(() => activeStudentLabel.value)
+const homeStudentColumns = computed(() => studentSwitcherList.value.map(s => ({
   text: s.display_name || `学生 #${s.id}`,
   value: normalizeStudentId(s.id),
 })))
-const homePickerDefaultIndex = computed(() => {
-  const idx = accessibleStudents.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
-  return idx >= 0 ? idx : 0
+const homePickerSelectedValues = computed(() => {
+  const id = currentStudentId.value
+  return id != null ? [id] : []
 })
 
 async function refreshStudentSwitcher() {
@@ -476,11 +548,47 @@ async function refreshStudentSwitcher() {
     syncStudentsAndActive(r.students || [])
   } catch { /* ignore */ }
 }
+function openHomeStudentPicker() {
+  pickerEpoch.value += 1
+  showHomeStudentPicker.value = true
+}
+function extractPickerStudentId(payload) {
+  if (payload == null) return null
+  // Vant 4 object payload
+  const fromOpt = payload?.selectedOptions?.[0]
+  if (fromOpt && typeof fromOpt === 'object') {
+    const id = normalizeStudentId(fromOpt.value ?? fromOpt.id)
+    if (id != null) return id
+  }
+  const fromValues = payload?.selectedValues?.[0]
+  const fromValuesId = normalizeStudentId(fromValues)
+  if (fromValuesId != null) return fromValuesId
+  // Legacy: confirm may pass array of values / options directly
+  if (Array.isArray(payload)) {
+    const first = payload[0]
+    if (first && typeof first === 'object') {
+      return normalizeStudentId(first.value ?? first.id)
+    }
+    return normalizeStudentId(first)
+  }
+  return normalizeStudentId(payload)
+}
 function onHomePickStudent(payload) {
   showHomeStudentPicker.value = false
-  const opt = payload?.selectedOptions?.[0]
-  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
-  if (id) setActiveStudentId(id)
+  const id = extractPickerStudentId(payload)
+  if (id == null) {
+    showFailToast('请选择有效学生档案')
+    return
+  }
+  if (id === currentStudentId.value) return
+  const beforeCount = accessibleStudents.value.length
+  if (!switchActiveStudent(id)) {
+    showFailToast('无法切换到该学生')
+    return
+  }
+  if (accessibleStudents.value.length !== beforeCount) {
+    refreshStudentSwitcher()
+  }
 }
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
