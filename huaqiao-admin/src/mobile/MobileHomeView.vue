@@ -67,10 +67,17 @@ import { api } from '../api/client'
 const data = ref(null)
 const loading = ref(true)
 const error = ref('')
+const unreadNotif = ref(null)
 
 onMounted(async () => {
   try {
     data.value = await api.dashboard()
+    try {
+      const n = await api.notifications({ unread_only: true })
+      unreadNotif.value = n.unread_count ?? (n.items || []).length
+    } catch {
+      unreadNotif.value = null
+    }
   } catch (e) {
     error.value = e.message || '加载失败'
   } finally {
