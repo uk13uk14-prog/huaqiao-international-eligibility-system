@@ -102,7 +102,11 @@ git pull origin cursor/mobile-cloud-preview
 bash deploy/api/m1-db-source-discover.sh
 ```
 
-见 `deploy/api/DB_SOURCE_RECOVERY.md`。`DATABASE_SOURCE_CONFIRMED=YES` 之前禁止恢复启动。
+见 `deploy/api/DB_SOURCE_RECOVERY.md`。关注：
+
+- `DATABASE_IDENTITY_CONFIRMED`（125/900 身份）≠ `SCHEMA_CURRENT`（是否已有 V2 student 表）
+- 身份确认后下一步：`bash deploy/api/m1-db-schema-fingerprint.sh`（只读 alembic_version）
+- `DATABASE_SOURCE_CONFIRMED=YES` / IDENTITY=YES 之前禁止恢复启动 / 写 `.env` / migration
 
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 

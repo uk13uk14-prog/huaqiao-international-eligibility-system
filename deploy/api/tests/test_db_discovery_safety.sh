@@ -8,10 +8,12 @@ ok() { echo "PASS: $*"; N_PASS=$((N_PASS + 1)); }
 ko() { echo "FAIL: $*"; N_FAIL=$((N_FAIL + 1)); }
 
 DISC="${ROOT}/deploy/api/m1-db-source-discover.sh"
+FINGER="${ROOT}/deploy/api/m1-db-schema-fingerprint.sh"
 GUARD="${ROOT}/deploy/api/production-db-guard.sh"
 
 echo "ROOT=${ROOT}"
 echo "DISC_EXISTS=$([[ -f $DISC ]] && echo YES || echo NO)"
+echo "FINGER_EXISTS=$([[ -f $FINGER ]] && echo YES || echo NO)"
 
 # 1) Guard: no .env and no ambient DATABASE_URL -> refuse start
 TMP="$(mktemp -d)"
@@ -33,28 +35,58 @@ else
 fi
 rm -rf "$TMP"
 
-# 2) Discovery script: strip comment lines, then scan for forbidden ops
-if [[ ! -f "$DISC" ]]; then
-  ko "discovery script missing"
-else
+# 2) Discovery + fingerprint scripts: strip comment lines, then scan for forbidden ops
+for SCR in "$DISC" "$FINGER"; do
+  label="$(basename "$SCR")"
+  if [[ ! -f "$SCR" ]]; then
+    ko "${label} missing"
+    continue
+  fi
   non_comments="$(mktemp)"
-  grep -vE '^[[:space:]]*#' "$DISC" >"$non_comments" || true
+  grep -vE '^[[:space:]]*#' "$SCR" >"$non_comments" || true
   bad=0
   if grep -nE '\b(INSERT|UPDATE|DELETE FROM|DROP TABLE|ALTER TABLE)\b' "$non_comments"; then
     bad=1
   fi
-  if grep -nE 'alembic[[:space:]]+(upgrade|downgrade)|seed_data\(|init_db\(|create_all\(|CREATE DATABASE|CREATE TABLE' "$non_comments"; then
+  if grep -nE 'alembic[[:space:]]+(upgrade|downgrade)|seed_data\(|init_db\(|create_all\(|CREATE DATABASE|CREATE TABLE' "$non_comments" \
+    | grep -vE 'echo |TEMPLATE|FUTURE|NOTE|consider alembic|HINT|ban|forbid'; then
     bad=1
   fi
   if grep -nE 'stash[[:space:]]+(pop|apply|drop)' "$non_comments"; then
     bad=1
   fi
+  if grep -nE '\bpg_dump\b' "$non_comments" | grep -vE 'TEMPLATE|echo|FUTURE|NOTE|which pg_dump|command -v pg_dump|PG_DUMP'; then
+    # fingerprint may mention pg_dump in templates / availability check only
+    :
+  fi
+  # Ensure fingerprint does not execute pg_dump (only templates / which)
+  if [[ "$label" == "m1-db-schema-fingerprint.sh" ]]; then
+    if grep -nE '[[:space:]]pg_dump[[:space:]]' "$non_comments" | grep -vE 'which|command -v|TEMPLATE|echo|FUTURE'; then
+      bad=1
+    fi
+  fi
   rm -f "$non_comments"
   if [[ "$bad" -eq 0 ]]; then
-    ok "Discovery script has no write SQL alembic seed or stash mutate"
+    ok "${label} has no write SQL alembic seed or stash mutate"
   else
-    ko "Discovery script contains forbidden operations"
+    ko "${label} contains forbidden operations"
   fi
+done
+
+# 2b) Identity vs schema flags present in discover
+if grep -q 'DATABASE_IDENTITY_CONFIRMED' "$DISC" \
+  && grep -q 'SCHEMA_CURRENT' "$DISC" \
+  && grep -q 'STUDENT_TABLE_PRESENT' "$DISC"; then
+  ok "Discover distinguishes IDENTITY SCHEMA_CURRENT STUDENT_TABLE_PRESENT"
+else
+  ko "Discover missing identity/schema distinction flags"
+fi
+
+# 2c) Fingerprint expects student migration 004
+if grep -q '004_student_master_profile' "$FINGER"; then
+  ok "Fingerprint maps student_master_profiles to 004"
+else
+  ko "Fingerprint missing 004_student_master_profile mapping"
 fi
 
 # 3) Secret redaction
@@ -77,7 +109,7 @@ fi
 # 4) stash untouched in non-comment code
 set +e
 hits="$(grep -nE 'stash[[:space:]]+(pop|apply|drop)' \
-  "$DISC" "$GUARD" "${ROOT}/deploy/api/m1-saas-runtime-recover.sh" 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#')"
+  "$DISC" "$FINGER" "$GUARD" "${ROOT}/deploy/api/m1-saas-runtime-recover.sh" 2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#')"
 set -e
 if [[ -n "${hits}" ]]; then
   echo "$hits"

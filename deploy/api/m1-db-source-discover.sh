@@ -330,13 +330,17 @@ ORM_MODEL=StudentTimelineItem       TABLE=student_timeline_items
 ORM_MODEL=ExpertConsultation        TABLE=expert_consultations
 ORM_MODEL=ConsultationReportVersion TABLE=consultation_report_versions
 ORM_MODEL=MemberTimelineReminder    TABLE=member_timeline_reminders
-EXPECTED_FINGERPRINT universities≈125 admission_schedules≈900 student_master_profiles≈2
-NOTE: universities/schedules may also exist in code catalog (MIXED); students are DB-only.
+EXPECTED_FINGERPRINT universities≈125 admission_schedules≈900
+NOTE: student_master_profiles is V2 (alembic 004+); identity does NOT require it.
+NOTE: pre-V2 student-like data may be in customer_vaults; USER_COUNT=2 must not be confused with V2 students.
 ORM
 
 # ---------- 12. READ-ONLY Postgres probe ----------
 section "12 READ-ONLY postgres fingerprint (docker exec)"
 DATABASE_SOURCE_CONFIRMED=NO
+DATABASE_IDENTITY_CONFIRMED=NO
+SCHEMA_CURRENT=NO
+STUDENT_TABLE_PRESENT=NO
 DATABASE_URL_REDACTED=""
 SCHEMA_MATCH=NO
 UNI_COUNT=NA
@@ -345,10 +349,12 @@ STU_COUNT=NA
 USER_COUNT=NA
 RECORD_COUNT=NA
 MEMBERSHIP_COUNT=NA
+VAULT_COUNT=NA
 CANDIDATE_DBS=""
 UNIVERSITY_SOURCE=UNKNOWN
 TIMELINE_SOURCE=UNKNOWN
-STUDENT_SOURCE=DB
+STUDENT_SOURCE=UNKNOWN
+HISTORICAL_STUDENT_SOURCE=UNKNOWN
 
 pg_exec_sql() {
   # $1=db $2=sql — SELECT only; caller responsibility
@@ -373,6 +379,7 @@ if [[ "${CONTAINER_FOUND}" == "YES" ]]; then
   # Probe each non-template DB for ORM tables + counts
   best_score=-1
   best_db=""
+  best_has_stu=0
   while IFS= read -r dbname; do
     [[ -n "$dbname" ]] || continue
     [[ "$dbname" == "postgres" ]] && continue
@@ -385,18 +392,20 @@ if [[ "${CONTAINER_FOUND}" == "YES" ]]; then
     echo "tables:"
     echo "$tables" | sed 's/^/  /'
 
-    has_uni=0; has_sched=0; has_stu=0; has_users=0; has_elig=0; has_plans=0
+    has_uni=0; has_sched=0; has_stu=0; has_users=0; has_elig=0; has_plans=0; has_vault=0
     echo "$tables" | grep -qx 'universities' && has_uni=1
     echo "$tables" | grep -qx 'admission_schedules' && has_sched=1
     echo "$tables" | grep -qx 'student_master_profiles' && has_stu=1
     echo "$tables" | grep -qx 'users' && has_users=1
     echo "$tables" | grep -qx 'eligibility_records' && has_elig=1
     echo "$tables" | grep -qx 'membership_plans' && has_plans=1
+    echo "$tables" | grep -qx 'customer_vaults' && has_vault=1
 
-    score=$((has_uni + has_sched + has_stu + has_users + has_elig + has_plans))
-    echo "ORM_TABLE_HITS=${score}/6"
+    # Core SaaS score does NOT require student_master_profiles (V2)
+    score=$((has_uni + has_sched + has_users + has_elig + has_plans + has_vault))
+    echo "ORM_CORE_HITS=${score}/6 STUDENT_TABLE_PRESENT=$([[ $has_stu -eq 1 ]] && echo YES || echo NO)"
 
-    uc=NA; tc=NA; sc=NA; usc=NA; rc=NA; mc=NA
+    uc=NA; tc=NA; sc=NA; usc=NA; rc=NA; mc=NA; vc=NA
     if [[ "$has_uni" -eq 1 ]]; then
       uc="$(pg_exec_sql "$dbname" "SELECT count(*) FROM universities;" || echo NA)"
       uc="$(echo "$uc" | tr -d '[:space:]')"
@@ -421,38 +430,67 @@ if [[ "${CONTAINER_FOUND}" == "YES" ]]; then
       mc="$(pg_exec_sql "$dbname" "SELECT count(*) FROM membership_plans;" || echo NA)"
       mc="$(echo "$mc" | tr -d '[:space:]')"
     fi
-    echo "FINGERPRINT db=${dbname} universities=${uc} admission_schedules=${tc} student_master_profiles=${sc} users=${usc} eligibility_records=${rc} membership_plans=${mc}"
+    if [[ "$has_vault" -eq 1 ]]; then
+      vc="$(pg_exec_sql "$dbname" "SELECT count(*) FROM customer_vaults;" || echo NA)"
+      vc="$(echo "$vc" | tr -d '[:space:]')"
+    fi
+    echo "FINGERPRINT db=${dbname} universities=${uc} admission_schedules=${tc} student_master_profiles=${sc} users=${usc} eligibility_records=${rc} membership_plans=${mc} customer_vaults=${vc}"
 
     if [[ "$score" -gt "$best_score" ]]; then
       best_score=$score
       best_db="$dbname"
+      best_has_stu=$has_stu
       UNI_COUNT="$uc"
       TL_COUNT="$tc"
       STU_COUNT="$sc"
       USER_COUNT="$usc"
       RECORD_COUNT="$rc"
       MEMBERSHIP_COUNT="$mc"
+      VAULT_COUNT="$vc"
     fi
   done <<< "$(echo "$DBS")"
 
   if [[ -n "$best_db" && "$best_score" -ge 4 ]]; then
     SCHEMA_MATCH=YES
     echo "BEST_CANDIDATE_DB=${best_db}"
-    echo "SCHEMA_MATCH=YES"
-    # Confirm fingerprint: students especially; uni/tl soft match
-    stu_ok=0
-    if [[ "${STU_COUNT}" =~ ^[0-9]+$ ]] && [[ "${STU_COUNT}" -ge 1 ]]; then
-      stu_ok=1
+    echo "SCHEMA_MATCH=YES (core SaaS tables; V2 student table optional)"
+    [[ "$best_has_stu" -eq 1 ]] && STUDENT_TABLE_PRESENT=YES
+    # SCHEMA_CURRENT requires V2 student + timeline tables
+    has_tl_items=0
+    tables_best="$(pg_exec_sql "$best_db" "SELECT tablename FROM pg_tables WHERE schemaname='public';" || true)"
+    echo "$tables_best" | grep -qx 'student_timeline_items' && has_tl_items=1
+    if [[ "$best_has_stu" -eq 1 && "$has_tl_items" -eq 1 ]]; then
+      SCHEMA_CURRENT=YES
+    else
+      SCHEMA_CURRENT=NO
     fi
+
     users_ok=0
     if [[ "${USER_COUNT}" =~ ^[0-9]+$ ]] && [[ "${USER_COUNT}" -ge 1 ]]; then
       users_ok=1
     fi
-    if [[ "$stu_ok" -eq 1 && "$users_ok" -eq 1 && "${CONTAINER_FOUND}" == "YES" ]]; then
+    uni_ok=0
+    tl_ok=0
+    if [[ "${UNI_COUNT}" == "${EXPECTED_UNI}" ]]; then uni_ok=1; fi
+    if [[ "${TL_COUNT}" == "${EXPECTED_TL}" ]]; then tl_ok=1; fi
+
+    # IDENTITY: historical fingerprint — do NOT require student_master_profiles
+    if [[ "${CONTAINER_FOUND}" == "YES" && "$users_ok" -eq 1 && "$uni_ok" -eq 1 && "$tl_ok" -eq 1 ]]; then
+      DATABASE_IDENTITY_CONFIRMED=YES
+    elif [[ "${CONTAINER_FOUND}" == "YES" && "$users_ok" -eq 1 ]]; then
+      if [[ "${UNI_COUNT}" =~ ^[0-9]+$ ]] && [[ "${UNI_COUNT}" -ge 100 ]] && [[ "${TL_COUNT}" =~ ^[0-9]+$ ]] && [[ "${TL_COUNT}" -ge 500 ]]; then
+        DATABASE_IDENTITY_CONFIRMED=YES
+        note "Soft identity: large catalog fingerprint without exact 125/900"
+      fi
+    fi
+
+    if [[ "${DATABASE_IDENTITY_CONFIRMED}" == "YES" ]]; then
+      # Align legacy flag with identity (schema currency is separate)
       DATABASE_SOURCE_CONFIRMED=YES
       host_user="${PG_USER:-UNKNOWN}"
-      DATABASE_URL_REDACTED="postgresql://${host_user}:***@127.0.0.1:${PG_HOST_PORT_DEFAULT}/${best_db}"
+      DATABASE_URL_REDACTED="postgresql+psycopg://${host_user}:***@127.0.0.1:${PG_HOST_PORT_DEFAULT}/${best_db}"
     fi
+
     if [[ "${UNI_COUNT}" =~ ^[0-9]+$ ]] && [[ "${UNI_COUNT}" -gt 0 ]]; then
       UNIVERSITY_SOURCE=DB
     else
@@ -463,21 +501,35 @@ if [[ "${CONTAINER_FOUND}" == "YES" ]]; then
     else
       TIMELINE_SOURCE=CODE_TEMPLATES_OR_EMPTY_DB
     fi
-    STUDENT_SOURCE=DB
+
+    if [[ "${STUDENT_TABLE_PRESENT}" == "YES" ]]; then
+      STUDENT_SOURCE=DB:student_master_profiles
+      HISTORICAL_STUDENT_SOURCE=student_master_profiles
+    elif [[ "${VAULT_COUNT}" =~ ^[0-9]+$ ]]; then
+      STUDENT_SOURCE=LEGACY:customer_vaults
+      HISTORICAL_STUDENT_SOURCE="customer_vaults count=${VAULT_COUNT}; USER_COUNT=${USER_COUNT} may explain historical '2 students' label"
+    else
+      STUDENT_SOURCE=PRE_V2_OR_UNKNOWN
+      HISTORICAL_STUDENT_SOURCE="no student_master_profiles; check customer_vaults/users"
+    fi
   else
     echo "SCHEMA_MATCH=NO"
-    warn "No DB with enough ORM tables (need >=4 hits including core SaaS tables)"
+    warn "No DB with enough core ORM tables (need >=4 of universities/schedules/users/eligibility/plans/vaults)"
   fi
 else
   warn "Skipping SQL fingerprint — container not found"
 fi
 
 # Soft compare to historical targets (do not alone decide)
-echo "HISTORICAL_TARGET universities=${EXPECTED_UNI} schedules=${EXPECTED_TL} students=${EXPECTED_STU}"
-echo "OBSERVED universities=${UNI_COUNT} schedules=${TL_COUNT} students=${STU_COUNT}"
-if [[ "${UNI_COUNT}" == "${EXPECTED_UNI}" ]]; then echo "UNI_COUNT_MATCH=YES"; else echo "UNI_COUNT_MATCH=NO_OR_NA (may still be prod if MIXED)"; fi
+echo "HISTORICAL_TARGET universities=${EXPECTED_UNI} schedules=${EXPECTED_TL} students_V2=${EXPECTED_STU}"
+echo "OBSERVED universities=${UNI_COUNT} schedules=${TL_COUNT} student_master_profiles=${STU_COUNT} users=${USER_COUNT} customer_vaults=${VAULT_COUNT}"
+if [[ "${UNI_COUNT}" == "${EXPECTED_UNI}" ]]; then echo "UNI_COUNT_MATCH=YES"; else echo "UNI_COUNT_MATCH=NO_OR_NA"; fi
 if [[ "${TL_COUNT}" == "${EXPECTED_TL}" ]]; then echo "TL_COUNT_MATCH=YES"; else echo "TL_COUNT_MATCH=NO_OR_NA"; fi
-if [[ "${STU_COUNT}" == "${EXPECTED_STU}" ]]; then echo "STU_COUNT_MATCH=YES"; else echo "STU_COUNT_MATCH=NO_OR_NA"; fi
+if [[ "${STU_COUNT}" == "${EXPECTED_STU}" ]]; then echo "STU_V2_COUNT_MATCH=YES"; else echo "STU_V2_COUNT_MATCH=NO_OR_NA (OK if pre-004 schema)"; fi
+echo "DATABASE_IDENTITY_CONFIRMED=${DATABASE_IDENTITY_CONFIRMED}"
+echo "SCHEMA_CURRENT=${SCHEMA_CURRENT}"
+echo "STUDENT_TABLE_PRESENT=${STUDENT_TABLE_PRESENT}"
+echo "HINT=If IDENTITY=YES but SCHEMA_CURRENT=NO, run: bash deploy/api/m1-db-schema-fingerprint.sh"
 
 # ---------- Final summary ----------
 section "SUMMARY"
@@ -491,15 +543,20 @@ POSTGRES_USER=${PG_USER:-UNKNOWN}
 POSTGRES_DB_DEFAULT=${PG_DB:-UNKNOWN}
 CANDIDATE_DBS=${CANDIDATE_DBS}
 SCHEMA_MATCH=${SCHEMA_MATCH}
+DATABASE_IDENTITY_CONFIRMED=${DATABASE_IDENTITY_CONFIRMED}
+SCHEMA_CURRENT=${SCHEMA_CURRENT}
+STUDENT_TABLE_PRESENT=${STUDENT_TABLE_PRESENT}
 UNIVERSITY_COUNT=${UNI_COUNT}
 TIMELINE_COUNT=${TL_COUNT}
 STUDENT_COUNT=${STU_COUNT}
 USER_COUNT=${USER_COUNT}
+CUSTOMER_VAULT_COUNT=${VAULT_COUNT}
 RECORD_COUNT=${RECORD_COUNT}
 MEMBERSHIP_COUNT=${MEMBERSHIP_COUNT}
 UNIVERSITY_SOURCE=${UNIVERSITY_SOURCE}
 TIMELINE_SOURCE=${TIMELINE_SOURCE}
 STUDENT_SOURCE=${STUDENT_SOURCE}
+HISTORICAL_STUDENT_SOURCE=${HISTORICAL_STUDENT_SOURCE}
 DATABASE_SOURCE_CONFIRMED=${DATABASE_SOURCE_CONFIRMED}
 DATABASE_URL_REDACTED=${DATABASE_URL_REDACTED}
 ENV_WRITE=NO
@@ -508,7 +565,7 @@ MIGRATION_RUN=NO
 SEED_RUN=NO
 STASH_TOUCH=NO
 CNBER_TOUCH=NO
-NEXT_STEP=If DATABASE_SOURCE_CONFIRMED=YES, paste this SUMMARY back; a separate restore script may then create backend/.env (not this script).
+NEXT_STEP=If DATABASE_IDENTITY_CONFIRMED=YES, run m1-db-schema-fingerprint.sh for alembic_version / revision gap. Do not write .env in this script. Do not migrate yet.
 SUM
 
 echo "============================================================"
