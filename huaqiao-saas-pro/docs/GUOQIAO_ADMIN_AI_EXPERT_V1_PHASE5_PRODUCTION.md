@@ -94,6 +94,14 @@ Pre-existing CI reds on `cursor/mobile-cloud-preview` (via open PR → main):
 | Deploy H5 | missing repo secret `CLOUDFLARE_API_TOKEN` | soft-warn (build still verified); manual/cloud deploy OK |
 | Workers Builds (CF) | Cloudflare Git build integration | out of band / secrets — not blocking M1 |
 
+## DB binding fix (2026-09-04) — after M1 PRECHECK abort
+
+**ROOT_CAUSE:** release script used `docker exec … psql -U postgres`, but production role is `huaqiao` (no `postgres` role). Error looked like host socket `:5432` because container `psql` defaulted incorrectly under wrong role.
+
+**Fix:** read `POSTGRES_USER`/`PASSWORD`/`DB` from `huaqiao-postgres`; bind `127.0.0.1:5433/huaqiao` via redacted `backend/.env` `DATABASE_URL`; refuse `:5432` / sqlite / seed; backup gate before 006→007.
+
+Regression: `deploy/api/tests/test_admin_ai_expert_v1_release_db_binding.sh`
+
 ---
 
 ## Absolute safety (still in force)
