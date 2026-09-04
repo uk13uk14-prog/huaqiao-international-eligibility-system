@@ -88,12 +88,38 @@ CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibili
 
 ## 用户最小动作（M1）
 
-若 API 尚未解析 / 未接通，只需：
+**已确认本仓 Cloud Agent 环境内 SaaS 监听端口为 `8010`（勿猜）。**  
+Cloud Agent **无法** SSH M1 / 无 self-hosted worker；Tunnel 必须在 M1 执行一次。
 
-1. 确认 Free `:8000` 与 SaaS `:8010` 本机已运行，并连到**现有**数据库  
-2. 安装 Caddy，用本目录 `Caddyfile` 监听 `127.0.0.1:8088`  
-3. 安装并登录 `cloudflared`，用本目录示例创建 Tunnel，hostname=`api.guoqiaoplan.com` → `http://127.0.0.1:8088`  
-4. 两端 `.env` 设置 `CORS_ORIGINS`（见 `env.production.example`）并重启后端  
-5. 验证：`curl -sS https://api.guoqiaoplan.com/api/health`
+若 API 尚未解析 / 未接通，在 M1 仓库根目录执行：
+
+```bash
+# 0) 两端 CORS（重启 backend 生效；禁止 *）
+# CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibility-system.rambolluk.workers.dev
+
+# 1) 确认本机后端
+curl -sS http://127.0.0.1:8010/api/health
+curl -sS http://127.0.0.1:8000/api/health
+
+# 2) 一次性拉起 Caddy + Cloudflare Tunnel（会创建 DNS CNAME）
+brew install caddy cloudflare/cloudflare/cloudflared   # 若未安装
+cloudflared login                                      # 仅首次
+bash deploy/api/m1-go-live.sh
+```
+
+验证：
+
+```bash
+curl -sS https://api.guoqiaoplan.com/api/health
+```
 
 完成后无需再改 H5 代码；已指向正式 API 域名。
+
+## H5 部署 secrets（GitHub Actions）
+
+若 Actions 报 `SECRET_REQUIRED=YES`，在 GitHub repo → Settings → Secrets 添加（**不要把 token 发给 Agent**）：
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+或依赖 Cloudflare Dashboard → Workers Builds 从 `cursor/mobile-cloud-preview` 自动 `npx wrangler versions upload`。

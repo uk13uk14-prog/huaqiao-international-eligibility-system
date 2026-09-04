@@ -10,6 +10,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-h5-preview.yml"
+      - "scripts/cf-build-h5.mjs"
   workflow_dispatch:
 
 permissions:
@@ -39,31 +40,52 @@ jobs:
       - name: Install root (wrangler)
         run: npm install
 
+      # Vite loads huaqiao-app/.env.production (https://api.guoqiaoplan.com).
+      # Do not inject empty VITE_* from unset GitHub vars — that overrides .env.production.
       - name: Build huaqiao-app
         run: npm run build:h5
-        env:
-          # Empty GitHub vars must not override .env.production — always resolve to HTTPS origin
-          VITE_API_BASE: ${{ vars.VITE_API_BASE != '' && vars.VITE_API_BASE || 'https://api.guoqiaoplan.com' }}
-          VITE_SAAS_API: ${{ vars.VITE_SAAS_API != '' && vars.VITE_SAAS_API || 'https://api.guoqiaoplan.com' }}
 
-      - name: Verify dist
+      - name: Verify dist embeds production API
         run: |
           test -f huaqiao-app/dist/index.html
           test -d huaqiao-app/dist/assets
           ls -la huaqiao-app/dist huaqiao-app/dist/assets
+          python3 - <<'PY'
+          from pathlib import Path
+          js = next(Path("huaqiao-app/dist/assets").glob("index-*.js")).read_text(encoding="utf-8", errors="ignore")
+          assert "https://api.guoqiaoplan.com" in js, "production API origin missing from bundle"
+          for bad in ("127.0.0.1", "localhost", "100.97.", "192.168."):
+              assert bad not in js, f"private URL leaked: {bad}"
+          print("bundle_ok", next(Path("huaqiao-app/dist/assets").glob("index-*.js")).name)
+          PY
+
+      - name: Check Cloudflare secrets
+        id: cf_secrets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Missing GitHub secrets CLOUDFLARE_API_TOKEN and/or CLOUDFLARE_ACCOUNT_ID"
+            echo "Workers Builds (Cloudflare Git) remains the fallback auto-deploy path."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Deploy to Cloudflare Workers (static assets)
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        if: steps.cf_secrets.outputs.present == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           packageManager: npm
           command: deploy
-          # Uses repo-root wrangler.toml → Worker huaqiao-international-eligibility-system
 
-      - name: Skip note when secrets absent
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' || secrets.CLOUDFLARE_ACCOUNT_ID == '' }}
+      - name: Fail when secrets missing (so deploy gap is visible)
+        if: steps.cf_secrets.outputs.present != 'true'
         run: |
-          echo "GitHub secrets not set; Cloudflare Git Workers Builds remains the primary auto-deploy path."
-          echo "Root wrangler.toml + [build].command must satisfy: npx wrangler versions upload"
+          echo "SECRET_REQUIRED=YES"
+          echo "SECRET_NAMES=CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID"
+          echo "Add these as GitHub Actions secrets, or confirm Cloudflare Workers Builds deploys this branch."
+          exit 1
