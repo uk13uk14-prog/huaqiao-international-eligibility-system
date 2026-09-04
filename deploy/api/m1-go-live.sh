@@ -1,59 +1,48 @@
 #!/usr/bin/env bash
-# M1 one-shot: expose existing local SaaS/Free backends via Cloudflare Tunnel.
-# Does NOT expose Postgres/SSH/Tailscale. Does NOT migrate databases.
-#
-# Prerequisites on M1:
-#   - SaaS backend listening (verify: curl -sS http://127.0.0.1:8010/api/health)
-#   - Free backend listening (verify: curl -sS http://127.0.0.1:8000/api/health)  [optional but recommended]
-#   - brew install caddy cloudflared   (or equivalent)
-#   - cloudflared login   (once)
-#
-# Usage (from repo root on M1):
-#   bash deploy/api/m1-go-live.sh
-
+# ONE_SHOT: run ONCE on M1 from repo root after: git pull origin cursor/mobile-cloud-preview
+# Completes: Caddy :8088 + named Cloudflare Tunnel + DNS for api.guoqiaoplan.com
+# Does NOT expose Postgres/SSH/8010/8088 publicly. Does NOT touch CNber.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-API_DIR="$ROOT/deploy/api"
+cd "$ROOT"
 TUNNEL_NAME="${TUNNEL_NAME:-guoqiao-api}"
 HOSTNAME="${HOSTNAME:-api.guoqiaoplan.com}"
-CADDY_ADDR="${CADDY_ADDR:-127.0.0.1:8088}"
+CADDY_ADDR="127.0.0.1:8088"
 
-echo "==> Audit local backends (do not guess ports)"
-if curl -fsS "http://127.0.0.1:8010/api/health" >/tmp/guoqiao-saas-health.json; then
-  echo "SaaS :8010 OK $(cat /tmp/guoqiao-saas-health.json)"
+need() { command -v "$1" >/dev/null || { echo "MISSING:$1"; exit 1; }; }
+
+echo "==> Preflight backends"
+curl -fsS "http://127.0.0.1:8010/api/health" | tee /tmp/gq-saas.json
+echo
+if ! curl -fsS "http://127.0.0.1:8000/api/health" >/tmp/gq-free.json; then
+  echo "WARN: Free API :8000 down (eligibility/history via free path). Continue with SaaS-only routes."
 else
-  echo "ERROR: SaaS not reachable on 127.0.0.1:8010 — start it first, then re-run."
-  exit 1
-fi
-if curl -fsS "http://127.0.0.1:8000/api/health" >/tmp/guoqiao-free-health.json; then
-  echo "Free :8000 OK $(cat /tmp/guoqiao-free-health.json)"
-else
-  echo "WARN: Free :8000 not up — eligibility/history via free API will fail until started."
+  cat /tmp/gq-free.json; echo
 fi
 
-echo "==> CORS reminder (set on both backends, then restart):"
-echo "CORS_ORIGINS=https://app.guoqiaoplan.com,https://huaqiao-international-eligibility-system.rambolluk.workers.dev"
-
-echo "==> Start Caddy on ${CADDY_ADDR} (loopback only)"
-if ! curl -fsS "http://${CADDY_ADDR}/api/health" >/dev/null 2>&1; then
-  caddy stop >/dev/null 2>&1 || true
-  caddy start --config "$API_DIR/Caddyfile" --adapter caddyfile
-  sleep 1
+echo "==> Ensure caddy + cloudflared"
+if ! command -v caddy >/dev/null; then
+  if command -v brew >/dev/null; then brew install caddy; else echo "Install caddy first"; exit 1; fi
 fi
-curl -fsS "http://${CADDY_ADDR}/api/health" | tee /tmp/guoqiao-caddy-health.json
+if ! command -v cloudflared >/dev/null; then
+  if command -v brew >/dev/null; then brew install cloudflare/cloudflare/cloudflared; else echo "Install cloudflared first"; exit 1; fi
+fi
+
+echo "==> Caddy loopback reverse proxy"
+caddy stop >/dev/null 2>&1 || true
+caddy start --config "$ROOT/deploy/api/Caddyfile" --adapter caddyfile
+sleep 1
+curl -fsS "http://${CADDY_ADDR}/api/health" | tee /tmp/gq-caddy.json
 echo
 
-echo "==> Ensure Cloudflare Tunnel ${TUNNEL_NAME} → http://${CADDY_ADDR}"
-if ! cloudflared tunnel list 2>/dev/null | grep -q "${TUNNEL_NAME}"; then
-  cloudflared tunnel create "${TUNNEL_NAME}"
+echo "==> Cloudflare named tunnel + DNS (browser login only if first time)"
+if ! cloudflared tunnel list 2>/dev/null | awk '{print $2}' | grep -qx "$TUNNEL_NAME"; then
+  cloudflared tunnel login || true
+  cloudflared tunnel create "$TUNNEL_NAME"
 fi
-TUNNEL_ID="$(cloudflared tunnel list | awk -v n="$TUNNEL_NAME" '$2==n {print $1; exit}')"
+TUNNEL_ID="$(cloudflared tunnel list | awk -v n="$TUNNEL_NAME" '$2==n{print $1; exit}')"
 CRED="$HOME/.cloudflared/${TUNNEL_ID}.json"
-if [[ ! -f "$CRED" ]]; then
-  echo "ERROR: missing credentials file $CRED"
-  exit 1
-fi
-
+test -f "$CRED"
 CFG="$HOME/.cloudflared/guoqiao-api.yml"
 cat >"$CFG" <<EOF
 tunnel: ${TUNNEL_ID}
@@ -63,10 +52,18 @@ ingress:
     service: http://${CADDY_ADDR}
   - service: http_status:404
 EOF
+cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME" || true
 
-echo "==> Route DNS ${HOSTNAME} → tunnel (Cloudflare managed CNAME)"
-cloudflared tunnel route dns "${TUNNEL_NAME}" "${HOSTNAME}" || true
-
-echo "==> Run tunnel (foreground). Keep this terminal open, or install as a service."
-echo "Verify: curl -sS https://${HOSTNAME}/api/health"
-exec cloudflared tunnel --config "$CFG" run "${TUNNEL_NAME}"
+echo "==> Starting tunnel (keep running). Health: https://${HOSTNAME}/api/health"
+nohup cloudflared tunnel --config "$CFG" run "$TUNNEL_NAME" >/tmp/gq-tunnel.log 2>&1 &
+echo $! >/tmp/gq-tunnel.pid
+sleep 5
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS "https://${HOSTNAME}/api/health" >/tmp/gq-pub-health.json; then
+    echo "PUBLIC_HEALTH_OK"; cat /tmp/gq-pub-health.json; echo; exit 0
+  fi
+  sleep 3
+done
+echo "Tunnel started but public health not yet OK — check /tmp/gq-tunnel.log"
+tail -n 40 /tmp/gq-tunnel.log || true
+exit 1
