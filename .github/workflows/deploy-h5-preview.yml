@@ -1,0 +1,60 @@
+name: Deploy H5 Preview
+
+on:
+  push:
+    branches:
+      - cursor/mobile-cloud-preview
+    paths:
+      - "huaqiao-app/**"
+      - ".github/workflows/deploy-h5-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: h5-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy guoqiao-mobile-preview
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: huaqiao-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: huaqiao-app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          # Leave empty for static shell; never inject Tailscale/LAN here
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+          VITE_SAAS_API: ${{ vars.VITE_SAAS_API }}
+
+      - name: Verify dist
+        run: |
+          test -f dist/index.html
+          test -d dist/assets
+          ls -la dist dist/assets
+
+      - name: Deploy to Cloudflare Workers (static assets)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: huaqiao-app
+          command: deploy
+          # Creates/updates Worker "guoqiao-mobile-preview" from wrangler.toml
