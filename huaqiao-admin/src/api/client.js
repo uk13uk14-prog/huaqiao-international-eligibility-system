@@ -1,6 +1,6 @@
 const TOKEN_KEY = 'guoqiao_admin_token'
 
-/** API base from env — never hardcode production URL. Empty = same-origin / Vite proxy. */
+/** API base from env — production builds must embed https://api.guoqiaoplan.com via .env.production */
 const API_BASE = (import.meta.env.VITE_ADMIN_API_BASE || '').replace(/\/$/, '')
 
 export function getToken() {
@@ -20,6 +20,15 @@ function url(path) {
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
 }
 
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = 'unknown' } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
 async function request(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -27,7 +36,18 @@ async function request(path, options = {}) {
   }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(url(path), { ...options, headers })
+
+  let res
+  try {
+    res = await fetch(url(path), { ...options, headers })
+  } catch (e) {
+    throw new ApiError('无法连接服务器，请稍后重试', {
+      status: 0,
+      code: 'network',
+      cause: e,
+    })
+  }
+
   const text = await res.text()
   let data = null
   try {
@@ -35,10 +55,21 @@ async function request(path, options = {}) {
   } catch {
     data = { detail: text }
   }
+
   if (!res.ok) {
     const detail = data?.detail
-    const msg = typeof detail === 'string' ? detail : JSON.stringify(detail || data)
-    throw new Error(msg || `HTTP ${res.status}`)
+    const detailStr = typeof detail === 'string' ? detail : null
+    if (res.status === 401) {
+      throw new ApiError('邮箱或密码错误', { status: 401, code: 'unauthorized' })
+    }
+    if (res.status === 403) {
+      throw new ApiError('当前账号无权进入运营后台', { status: 403, code: 'forbidden' })
+    }
+    const msg =
+      detailStr ||
+      (typeof detail === 'object' && detail ? `请求失败（HTTP ${res.status}）` : null) ||
+      `请求失败（HTTP ${res.status}）`
+    throw new ApiError(msg, { status: res.status, code: 'http' })
   }
   return data
 }
