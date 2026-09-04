@@ -1,0 +1,12 @@
+# Cloudflare Tunnel 示例（在 M1 本机使用，勿提交真实 credentials）
+#
+# 安装: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
+# 登录后创建 tunnel，将 credentials-file 路径替换为真实文件。
+
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /path/to/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: api.guoqiaoplan.com
+    service: http://127.0.0.1:8088
+  - service: http_status:404

@@ -42,8 +42,9 @@ jobs:
       - name: Build huaqiao-app
         run: npm run build:h5
         env:
-          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
-          VITE_SAAS_API: ${{ vars.VITE_SAAS_API }}
+          # Empty GitHub vars must not override .env.production — always resolve to HTTPS origin
+          VITE_API_BASE: ${{ vars.VITE_API_BASE != '' && vars.VITE_API_BASE || 'https://api.guoqiaoplan.com' }}
+          VITE_SAAS_API: ${{ vars.VITE_SAAS_API != '' && vars.VITE_SAAS_API || 'https://api.guoqiaoplan.com' }}
 
       - name: Verify dist
         run: |

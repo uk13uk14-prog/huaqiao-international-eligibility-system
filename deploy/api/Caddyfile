@@ -1,0 +1,19 @@
+# 仅本机回环；由 Cloudflare Tunnel 对外提供 HTTPS。
+# 不要把 bind 改成 0.0.0.0，不要直接映射公网端口。
+
+{
+	auto_https off
+}
+
+:8088 {
+	# SaaS Pro — 会员 / 学生档案 / 鉴权 / 大学库 / 时间线（会员感知）
+	@saas path /api/auth* /api/me* /api/students* /api/membership* /api/plans* /api/payments* /api/billing* /api/vault* /api/expert* /api/member* /api/assistant* /api/admin* /api/planning* /api/universities* /api/schedules* /api/recommendations* /api/audit-logs*
+	handle @saas {
+		reverse_proxy 127.0.0.1:8010
+	}
+
+	# Free API — 匿名资格判定 / 法规政策 / 历史记录 / telemetry / 咨询
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
+}
