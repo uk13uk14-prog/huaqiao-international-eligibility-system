@@ -19,7 +19,11 @@ git pull origin cursor/mobile-cloud-preview && \
 bash deploy/api/m1-production-db-upgrade-recover.sh
 ```
 
-## Checkpoint F note (alembic binding)
+## GUOQIAO_SKIP_SEED settings contract
+
+`GUOQIAO_SKIP_SEED=1` is a declared Settings field (`guoqiao_skip_seed: bool = False`).
+Do **not** rely on `extra="ignore"`. Startup uses `settings.guoqiao_skip_seed` only.
+
 
 `alembic.ini` defaults to `localhost:5432/huaqiao_saas`. `env.py` only overrides when
 `DATABASE_URL` is set; ConfigParser also treats `%` in URL-encoded passwords as

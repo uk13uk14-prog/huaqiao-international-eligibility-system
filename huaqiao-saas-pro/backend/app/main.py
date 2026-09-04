@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -123,9 +122,8 @@ def startup():
     validate_vault_config()
     init_db()
     # Production recovery: never rewrite catalog/schedules against a live DB.
-    # Set GUOQIAO_SKIP_SEED=1 in backend/.env (deploy scripts) to FAIL CLOSED on seed.
-    skip_seed = (os.getenv("GUOQIAO_SKIP_SEED") or "").strip().lower() in {"1", "true", "yes"}
-    if skip_seed:
+    # Deploy scripts set GUOQIAO_SKIP_SEED=1 → settings.guoqiao_skip_seed=True.
+    if settings.guoqiao_skip_seed:
         logger.info("GUOQIAO_SKIP_SEED enabled — skipping seed_data on startup")
         return
     db = SessionLocal()
