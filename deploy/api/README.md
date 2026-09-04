@@ -108,6 +108,14 @@ bash deploy/api/m1-db-source-discover.sh
 - 身份确认后下一步：`bash deploy/api/m1-db-schema-fingerprint.sh`（只读 alembic_version）
 - `DATABASE_SOURCE_CONFIRMED=YES` / IDENTITY=YES 之前禁止恢复启动 / 写 `.env` / migration
 
+身份与 alembic 指纹确认后（`003_r43_fix` → `006`），在 M1 执行受控升级：
+
+```bash
+bash deploy/api/m1-production-db-upgrade-recover.sh
+```
+
+见 `deploy/api/PRODUCTION_DB_UPGRADE.md`（先 backup+verify，再 migration；禁止 seed；缺 JWT/VAULT 则启动 FAIL CLOSED）。
+
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 
 根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。
