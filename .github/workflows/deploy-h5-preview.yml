@@ -81,10 +81,10 @@ jobs:
           packageManager: npm
           command: deploy
 
-      - name: Fail when token missing
+      - name: Warn when token missing (do not fail push)
         if: steps.cf_secrets.outputs.present != 'true'
         run: |
           echo "SECRET_REQUIRED=YES"
           echo "SECRET_NAMES=CLOUDFLARE_API_TOKEN"
-          echo "Add GitHub Actions secret CLOUDFLARE_API_TOKEN (Account → Workers Scripts Edit), then re-run this workflow."
-          exit 1
+          echo "::warning::Missing GitHub secret CLOUDFLARE_API_TOKEN — H5 build verified; deploy skipped (manual/cloud deploy OK)."
+          echo "Add repo secret CLOUDFLARE_API_TOKEN to enable Actions deploy."
