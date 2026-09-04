@@ -46,7 +46,7 @@
 
       <aside class="gq-panel ai-panel">
         <h2 style="margin-top:0">AI 专家工作台</h2>
-        <p class="gq-muted">student_id={{ data.student_id }} · 输出强制 DRAFT · {{ data.ai_provider?.AI_PROVIDER }}</p>
+        <p class="gq-muted">student_id={{ data.student_id }} · {{ data.ai_provider?.AI_PROVIDER }}</p>
         <div style="margin:12px 0;display:flex;flex-wrap:wrap;gap:8px">
           <el-button
             v-for="(label, kind) in kinds"
@@ -56,18 +56,39 @@
             @click="generate(kind)"
           >生成·{{ label }}</el-button>
         </div>
-        <div class="flow gq-muted">AI Generate → DRAFT → 编辑/提交审核 → APPROVED → PUBLISHED</div>
+        <div class="flow gq-muted">AI Generate → DRAFT → REVIEWED → APPROVED → PUBLISHED</div>
         <div v-if="activeDraft" style="margin-top:12px">
           <el-tag :type="statusType(activeDraft.status)" effect="dark">{{ activeDraft.status }}</el-tag>
           <span class="gq-muted" style="margin-left:8px">
             {{ activeDraft.report_kind }} · {{ activeDraft.ai_provider }}/{{ activeDraft.ai_model }}
             · v{{ activeDraft.version_count || 0 }}
           </span>
-          <el-input v-model="editContent" type="textarea" :rows="12" style="margin-top:8px" />
+          <el-input
+            v-model="editContent"
+            type="textarea"
+            :rows="12"
+            style="margin-top:8px"
+            :disabled="activeDraft.status === 'PUBLISHED'"
+          />
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <el-button size="small" @click="saveEdit">编辑/提交审核</el-button>
-            <el-button size="small" type="success" @click="approve">批准</el-button>
-            <el-button size="small" type="danger" @click="publish">发布</el-button>
+            <el-button
+              v-if="canEdit"
+              size="small"
+              @click="saveEdit"
+            >编辑 / 提交审核</el-button>
+            <el-button
+              v-if="canApprove"
+              size="small"
+              type="success"
+              @click="approve"
+            >批准</el-button>
+            <el-button
+              v-if="canPublish"
+              size="small"
+              type="danger"
+              @click="publish"
+            >发布</el-button>
+            <el-tag v-if="activeDraft.status === 'PUBLISHED'" type="success">已发布 · 只读（请新建新版本）</el-tag>
           </div>
           <p v-if="msg" class="gq-muted" style="margin-top:8px">{{ msg }}</p>
         </div>
@@ -79,7 +100,7 @@
       <el-table :data="history" size="small" @row-click="selectDraft" style="cursor:pointer">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="report_kind" label="report_kind" width="160" />
-        <el-table-column label="status" width="120">
+        <el-table-column label="status" width="140">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
             <el-tag v-if="row.status === 'PUBLISHED'" type="success" size="small" style="margin-left:4px">已发布</el-tag>
@@ -111,6 +132,9 @@ const generating = ref('')
 const msg = ref('')
 
 const history = computed(() => drafts.value || [])
+const canEdit = computed(() => ['DRAFT', 'REVIEWED'].includes(activeDraft.value?.status))
+const canApprove = computed(() => ['DRAFT', 'REVIEWED'].includes(activeDraft.value?.status))
+const canPublish = computed(() => activeDraft.value?.status === 'APPROVED')
 
 function pretty(v) {
   return JSON.stringify(v ?? {}, null, 2)
@@ -153,9 +177,11 @@ async function generate(kind) {
 function selectDraft(row) {
   activeDraft.value = row
   editContent.value = row.raw_draft || row.final_report || ''
+  msg.value = row.status === 'PUBLISHED' ? 'PUBLISHED 只读；如需修改请重新「生成」新版本' : ''
 }
 
 async function saveEdit() {
+  if (!canEdit.value) return
   const res = await api.aiEdit(props.studentId, activeDraft.value.id, editContent.value, true)
   activeDraft.value = res.draft
   msg.value = `已保存 → ${res.draft.status}`
@@ -163,6 +189,7 @@ async function saveEdit() {
 }
 
 async function approve() {
+  if (!canApprove.value) return
   const res = await api.aiApprove(props.studentId, activeDraft.value.id)
   activeDraft.value = res.draft
   msg.value = '已批准 APPROVED（学生仍不可见）'
@@ -170,6 +197,7 @@ async function approve() {
 }
 
 async function publish() {
+  if (!canPublish.value) return
   try {
     const res = await api.aiPublish(props.studentId, activeDraft.value.id)
     activeDraft.value = res.draft

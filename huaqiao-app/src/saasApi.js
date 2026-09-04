@@ -102,6 +102,9 @@ export const saasApi = {
 
   expertDetail: (id) => saasRequest(`/api/expert/consultations/${id}`),
 
+  publishedConsultations: (studentId) =>
+    saasRequest(`/api/students/${studentId}/published-consultations`),
+
   reminders: () => saasRequest('/api/member/reminders'),
 
   askAssistant: (question, context = '', mode = 'qa') =>

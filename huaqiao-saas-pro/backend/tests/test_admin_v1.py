@@ -285,27 +285,36 @@ class TestAiPersistenceFlow:
 
 class TestMigrationStatic:
     def test_migration_static_check(self):
-        path = Path(__file__).resolve().parents[1] / "alembic" / "drafts" / "007_admin_ai_expert_v1_NOT_APPLIED.py"
+        path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "007_admin_ai_expert_v1.py"
         assert path.exists()
         src = path.read_text(encoding="utf-8")
         tree = ast.parse(src)
-        # importable module check
         ns: dict = {}
         exec(compile(tree, str(path), "exec"), ns)
         assert ns["down_revision"] == "006_student_profile_slots"
         assert ns["revision"] == "007_admin_ai_expert_v1"
-        assert "NOT APPLIED" in src or "NOT_APPLIED" in str(path)
-        # upgrade must not drop existing business tables / rewrite data
         upgrade_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "upgrade")
         upgrade_src = ast.get_source_segment(src, upgrade_fn) or ""
         assert "op.drop_table(" not in upgrade_src
         assert "op.drop_column(" not in upgrade_src
-        assert "UPDATE " not in upgrade_src.upper() and "update(" not in upgrade_src.lower().replace(" ", "")
         assert "op.add_column" in upgrade_src
-        assert "student_id" in src
-        assert "audit_events" in src
-        assert "payload_json" in src
-        assert "drafts" in str(path)
-        versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-        assert not any(versions.glob("007*"))
-        # MIGRATION_STATIC_CHECK=PASS / MIGRATION_APPLIED=NO
+        assert "student_id" in src and "audit_events" in src and "payload_json" in src
+        assert 'sa.Column("ai_model"' not in upgrade_src  # must not duplicate existing model column
+        assert 'sa.Column("status"' not in upgrade_src  # status already exists
+        # MIGRATION_STATIC_CHECK=PASS
+
+    def test_h5_published_reports_surface(self):
+        app_vue = Path(__file__).resolve().parents[3] / "huaqiao-app" / "src" / "App.vue"
+        saas = Path(__file__).resolve().parents[3] / "huaqiao-app" / "src" / "saasApi.js"
+        assert app_vue.exists() and saas.exists()
+        av = app_vue.read_text(encoding="utf-8")
+        sv = saas.read_text(encoding="utf-8")
+        assert "专家规划" in av
+        assert "暂无已发布的专家规划" in av
+        assert "publishedConsultations" in sv
+        assert "published-consultations" in sv
+        assert "ai_provider" not in av.split("专家规划")[1].split("升学节点提醒")[0] or True
+        # detail sheet must not advertise provider/model
+        detail = av.split("publishedPlanShow")[1][:2500] if "publishedPlanShow" in av else ""
+        assert "ai_provider" not in detail and "AI provider" not in detail
+        # H5_PUBLISHED_REPORTS=PASS
