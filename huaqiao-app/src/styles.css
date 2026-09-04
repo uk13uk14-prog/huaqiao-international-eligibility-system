@@ -6,26 +6,40 @@ html.dark body { background: #0b1120; }
 .mobile-app.dark { background: #0b1120; color: #e2e8f0; --van-background: #0b1120; --van-background-2: #1e293b; --van-text-color: #e2e8f0; --van-text-color-2: #94a3b8; --van-border-color: #475569; --van-cell-background: #1e293b; --van-field-input-text-color: #f1f5f9; --van-nav-bar-background: #1e293b; }
 .screen { min-height: calc(100vh - 100px); padding: 14px 12px 22px; }
 .hero-card { color: white; border-radius: 24px; padding: 24px 20px; background: linear-gradient(135deg, #123c69, #2563eb); box-shadow: 0 16px 36px rgba(37, 99, 235, .24); margin-bottom: 14px; }
-.hero-card h1 {
+.hero-title {
   margin: 10px 0 6px;
-  font-size: 26px;
-  line-height: 1.3;
+  font-size: clamp(22px, 6vw, 28px);
+  line-height: 1.28;
+  font-weight: 700;
+  text-align: left;
   word-break: keep-all;
   overflow-wrap: normal;
-  line-break: strict;
 }
-/* Soft break before 系统 — hidden on wide screens so title can stay one line */
-.hero-title-br { display: none; }
+.hero-title-line {
+  display: block;
+  text-align: left;
+  margin: 0;
+  padding: 0;
+  text-indent: 0;
+}
+.hero-title-line--primary {
+  color: #f5d76e;
+  font-size: 1.08em;
+  letter-spacing: 0.02em;
+}
+.hero-title-line--secondary {
+  color: #ffffff;
+  font-size: 1em;
+  margin-top: 0.12em;
+}
 .hero-lead { margin: 0; opacity: .88; line-height: 1.6; font-size: 15px; }
 
-/* iPhone / small phones: avoid orphan 统; prefer 判定 | 系统 */
 @media (max-width: 430px) {
   .hero-card { padding: 22px 16px; }
-  .hero-card h1 {
-    font-size: clamp(21px, 5.8vw, 24px);
-    line-height: 1.32;
+  .hero-title {
+    font-size: clamp(22px, 6vw, 26px);
+    line-height: 1.3;
   }
-  .hero-title-br { display: block; }
 }
 .home-grid, .form-card, .result-screen .van-cell-group, .ai-screen .van-cell { margin-top: 12px; }
 .home-grid { margin-bottom: 8px; }

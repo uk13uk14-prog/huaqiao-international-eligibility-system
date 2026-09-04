@@ -16,7 +16,10 @@
     <main class="screen" @touchstart="touchStart" @touchend="touchEnd">
       <section v-if="tab === 'home'" class="home-screen">
         <div class="hero-card">
-          <h1>国际生/华侨生资格判定<br class="hero-title-br">系统</h1>
+          <h1 class="hero-title">
+            <span class="hero-title-line hero-title-line--primary">国际生/华侨生</span>
+            <span class="hero-title-line hero-title-line--secondary">资格判定系统</span>
+          </h1>
           <p class="hero-lead">欢迎使用</p>
         </div>
         <van-cell-group v-if="studentSwitcherList.length" inset class="home-student-switch">
