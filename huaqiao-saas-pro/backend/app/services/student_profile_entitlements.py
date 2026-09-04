@@ -38,6 +38,8 @@ PLAN_STUDENT_PROFILE_LIMITS: dict[str, int] = {
     "pro_monthly": PRO_STUDENT_PROFILE_LIMIT,
     "pro_yearly": PRO_STUDENT_PROFILE_LIMIT,
     "pro_plus_yearly": PRO_STUDENT_PROFILE_LIMIT,
+    # 7-day Pro trial (same seats as Pro while active; expired → free via is_paid)
+    "pro_trial": PRO_STUDENT_PROFILE_LIMIT,
     # Reserved commercial tiers (not required in UI this round)
     "family_plus": FAMILY_PLUS_STUDENT_PROFILE_LIMIT,
     "consultant_20": CONSULTANT_20_STUDENT_PROFILE_LIMIT,
@@ -74,6 +76,11 @@ class StudentProfileEntitlementService:
                     return value
             except (TypeError, ValueError):
                 pass
+        # Expired trial / free → FREE seats; active Pro/Trial/VIP → plan map
+        from .membership_trial import is_paid
+
+        if not is_paid(user):
+            return FREE_STUDENT_PROFILE_LIMIT
         return plan_student_profile_limit(user.plan_code)
 
     def count_used(self, db: Session, user: User) -> int:

@@ -118,3 +118,34 @@ html.dark body { background: #0b1120; }
 .smp-mobile { overflow-x: hidden; }
 .smp-mobile .van-tabs { max-width: 100%; }
 .smp-mobile .van-field__control { max-width: 100%; }
+
+/* 7-day Pro Trial — lightweight badge (server entitlement only) */
+.trial-badge {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+}
+.trial-badge--active {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+.trial-badge--urgent {
+  background: rgba(234, 88, 12, 0.12);
+  color: #c2410c;
+  border: 1px solid rgba(234, 88, 12, 0.3);
+}
+.trial-badge--expired {
+  background: rgba(100, 116, 139, 0.14);
+  color: #334155;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+}
+.dark .trial-badge--active { background: rgba(59, 130, 246, 0.18); color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); }
+.dark .trial-badge--urgent { background: rgba(249, 115, 22, 0.18); color: #fdba74; border-color: rgba(249, 115, 22, 0.35); }
+.dark .trial-badge--expired { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.3); }
+.trial-expired-copy { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: #475569; }
+.dark .trial-expired-copy { color: #94a3b8; }
