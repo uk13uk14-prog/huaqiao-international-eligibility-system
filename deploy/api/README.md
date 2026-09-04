@@ -126,6 +126,14 @@ bash deploy/api/m1-runtime-secret-restore.sh
 
 见 `deploy/api/RUNTIME_SECRET_RECOVERY.md`（禁止 invent secret；stdout 仅指纹；不覆盖 DATABASE_URL / GUOQIAO_SKIP_SEED / URL / CORS）。
 
+若 discovery 两次均为 `*_FOUND=NO`（旧 secret 不可找回），且 DB 已确认无历史加密业务数据（vaults/profiles=0），则允许在 M1 **本机生成新 secrets** 并 go-live：
+
+```bash
+bash deploy/api/m1-runtime-secret-bootstrap-and-go-live.sh
+```
+
+见 `deploy/api/RUNTIME_SECRET_BOOTSTRAP.md`（旧 JWT session 失效可接受；不 commit `.env`；缺 Tunnel credential 时 `USER_ACTION_REQUIRED`）。
+
 ### 若 `:8010` 已挂（PORT_8010_DOWN）或误用 Homebrew Python
 
 根因通常是：用了 `/opt/homebrew/bin/python3.12`（无 fastapi/uvicorn），而不是原先带依赖的 venv。

@@ -59,9 +59,13 @@ USER_ACTION_REQUIRED=YES
 
 | Key | 影响 |
 |-----|------|
-| JWT | 旧 token/session 可能失效；换新 key 会强制重新登录 — 本轮不自动生成 |
-| VAULT | 若有历史加密 vault/profile，不能随意换 key；当前已知 vault/profile 计数可为 0，仍禁止 invent |
-| ADMIN | 管理 token 可后续新建 — 本轮不自动生成 |
+| JWT | 旧 token/session 可能失效；换新 key 会强制重新登录 — discovery 阶段不自动生成 |
+| VAULT | 若有历史加密 vault/profile，不能随意换 key；已知计数可为 0，discovery 阶段仍禁止 invent |
+| ADMIN | 管理 token 可后续新建 — discovery 阶段不自动生成 |
+
+当 discovery 已确认 `*_FOUND=NO` 且生产库无加密业务数据时，改走 bootstrap：
+
+见 `deploy/api/RUNTIME_SECRET_BOOTSTRAP.md` / `m1-runtime-secret-bootstrap-and-go-live.sh`。
 
 ## 禁止
 
