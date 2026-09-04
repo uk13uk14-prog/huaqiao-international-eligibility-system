@@ -229,7 +229,15 @@ HC2="$(http_code "http://${SAAS_ADDR}/api/health")"
 [[ "${HC2}" == "200" ]] || abort "health after restart != 200"
 echo "SAAS_8010=UP"
 
-# Auth probes
+# New Admin V1 routes must exist (401/403 = mounted; 404 = old binary still running)
+DASH_CODE="$(http_code "http://${SAAS_ADDR}/api/admin/v1/dashboard")"
+STU_CODE="$(http_code "http://${SAAS_ADDR}/api/admin/v1/students")"
+echo "ADMIN_V1_DASHBOARD_HTTP=${DASH_CODE}"
+echo "ADMIN_V1_STUDENTS_HTTP=${STU_CODE}"
+[[ "${DASH_CODE}" != "404" && "${STU_CODE}" != "404" ]] \
+  || abort "admin/v1 still 404 after restart — code pull/restart incomplete"
+
+# Auth probes (seed credentials may not exist in production — informational only)
 ADMIN_LOGIN_CODE="$(http_code -X POST "http://${SAAS_ADDR}/api/auth/login" \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"admin123456"}')"
@@ -254,9 +262,12 @@ echo "UNIVERSITY_COUNT=${UNI2}"
 echo "TIMELINE_COUNT=${TL2}"
 echo "USER_COUNT=${USERS2}"
 echo "SAAS_8010=UP"
+echo "ADMIN_API=MOUNTED"
 echo "TUNNEL_CHANGED=NO"
 echo "CADDY_CHANGED=NO"
 echo "SECRET_CHANGED=NO"
 echo "CNBER_CHANGED=NO"
 echo "MAIN_CHANGED=NO"
-echo "NEXT=Deploy/bind admin.guoqiaoplan.com (Cloudflare Worker guoqiao-admin) then run admin E2E"
+echo "ADMIN_URL=https://admin.guoqiaoplan.com"
+echo "PRODUCTION_FREEZE=NO"
+echo "NEXT=Admin login E2E (dashboard/users/students/Student360 + AI Draft→Publish) then H5 published-only; freeze only if all PASS"
