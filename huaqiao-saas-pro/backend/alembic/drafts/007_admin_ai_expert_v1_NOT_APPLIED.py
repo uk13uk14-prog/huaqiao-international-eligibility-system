@@ -7,13 +7,18 @@ Status:
   MIGRATION_APPLIED = NO
   PRODUCTION_DB_CHANGED = NO
 
+Rules for this draft:
+  - upgrade: ONLY add nullable columns / indexes / new audit_events table
+  - NO drop of existing columns/tables
+  - NO rewrite / mass update / guessed student_id backfill
+  - downgrade: reverse only what this revision adds
+
 This file lives under alembic/drafts/ (NOT alembic/versions/) so Alembic
 will not auto-pick it. Copy into versions/ only after explicit staging approval.
 """
 from alembic import op
 import sqlalchemy as sa
 
-# NOTE: These identifiers are documentary — this revision is NOT in the chain.
 revision = "007_admin_ai_expert_v1"
 down_revision = "006_student_profile_slots"
 branch_labels = None
@@ -21,7 +26,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # --- expert_consultations: bind to student + AI metadata ---
+    # --- expert_consultations: bind to student + AI metadata (all nullable / additive) ---
     op.add_column(
         "expert_consultations",
         sa.Column("student_id", sa.Integer(), nullable=True),
@@ -45,12 +50,14 @@ def upgrade() -> None:
         ["assigned_consultant_id"],
         ["id"],
     )
+    # provider (ai_provider); model column ai_model already exists
     op.add_column("expert_consultations", sa.Column("ai_provider", sa.String(length=40), nullable=True))
-    # ai_model already exists on expert_consultations — do not duplicate.
     op.add_column("expert_consultations", sa.Column("report_kind", sa.String(length=60), nullable=True))
-    # status column already exists — keep as-is (pending_ai / draft_ready / published / ...).
+    op.add_column("expert_consultations", sa.Column("payload_json", sa.Text(), nullable=True))
+    # status column already exists — Admin V1 uses DRAFT/REVIEWED/APPROVED/PUBLISHED/ARCHIVED
+    # alongside legacy pending_ai/draft_ready/published. No enum rewrite.
 
-    # --- eligibility_records: optional student binding ---
+    # --- eligibility_records: optional student binding (no backfill) ---
     op.add_column(
         "eligibility_records",
         sa.Column("student_id", sa.Integer(), nullable=True),
@@ -64,7 +71,7 @@ def upgrade() -> None:
         ["id"],
     )
 
-    # --- durable audit events (AuditLogger is currently in-memory) ---
+    # --- durable audit events ---
     op.create_table(
         "audit_events",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -86,6 +93,7 @@ def downgrade() -> None:
     op.drop_constraint("fk_expert_consultations_assigned_consultant", "expert_consultations", type_="foreignkey")
     op.drop_constraint("fk_expert_consultations_student_id", "expert_consultations", type_="foreignkey")
     op.drop_index("ix_expert_consultations_student_id", table_name="expert_consultations")
+    op.drop_column("expert_consultations", "payload_json")
     op.drop_column("expert_consultations", "report_kind")
     op.drop_column("expert_consultations", "ai_provider")
     op.drop_column("expert_consultations", "assigned_consultant_id")

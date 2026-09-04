@@ -1,118 +1,103 @@
 <template>
-  <div v-if="data" class="gq-grid-2">
-    <div>
-      <h1 class="page-title">Student 360 · #{{ data.student_id }}</h1>
-      <p class="page-sub gq-muted">
-        {{ data.meta?.display_name }} · 所属用户 {{ data.owner?.email }} · 查询键 student_id={{ data.student_id }}
-      </p>
+  <div v-if="data">
+    <div class="gq-grid-2">
+      <div>
+        <h1 class="page-title">Student 360 · #{{ data.student_id }}</h1>
+        <p class="page-sub gq-muted">
+          {{ data.meta?.display_name }} · 所属用户 {{ data.owner?.email }} · student_id={{ data.student_id }}
+        </p>
 
-      <section class="gq-panel block">
-        <h3>1. 基本资料</h3>
-        <pre class="gq-pre">{{ pretty(data.sections.basic_info) }}</pre>
-      </section>
-      <section class="gq-panel block">
-        <h3>2. 所属用户</h3>
-        <pre class="gq-pre">{{ pretty(data.owner) }}</pre>
-      </section>
-      <section class="gq-panel block">
-        <h3>3–7. 档案 / 身份 / 教育 / 语言 / 目标</h3>
-        <el-tabs>
-          <el-tab-pane label="身份/国籍"><pre class="gq-pre">{{ pretty(data.sections.identity) }}</pre></el-tab-pane>
-          <el-tab-pane label="教育背景"><pre class="gq-pre">{{ pretty(data.sections.education) }}</pre></el-tab-pane>
-          <el-tab-pane label="语言成绩"><pre class="gq-pre">{{ pretty(data.sections.language_exams) }}</pre></el-tab-pane>
-          <el-tab-pane label="目标大学/专业"><pre class="gq-pre">{{ pretty(data.sections.goals) }}</pre></el-tab-pane>
-        </el-tabs>
-        <p class="gq-muted">敏感证件默认掩码：{{ data.privacy?.note || 'masked' }}</p>
-      </section>
-      <section class="gq-panel block">
-        <h3>8–9. 资格结果</h3>
-        <el-alert
-          v-if="data.eligibility?.mapping_status === 'UNRESOLVED'"
-          type="warning"
-          :closable="false"
-          title="历史资格记录尚未绑定到具体学生"
-          :description="data.eligibility.message"
-          style="margin-bottom:10px"
-        />
-        <el-tag>{{ data.eligibility?.mapping_status }}</el-tag>
-        <div style="margin-top:8px">
-          <strong>国际生：</strong>
-          <span>{{ data.eligibility?.international?.conclusion || '—' }}</span>
+        <section class="gq-panel block">
+          <h3>基本资料 / 所属用户</h3>
+          <pre class="gq-pre">{{ pretty({ basic: data.sections.basic_info, owner: data.owner }) }}</pre>
+        </section>
+        <section class="gq-panel block">
+          <h3>档案分节</h3>
+          <el-tabs>
+            <el-tab-pane label="身份/国籍"><pre class="gq-pre">{{ pretty(data.sections.identity) }}</pre></el-tab-pane>
+            <el-tab-pane label="教育背景"><pre class="gq-pre">{{ pretty(data.sections.education) }}</pre></el-tab-pane>
+            <el-tab-pane label="语言成绩"><pre class="gq-pre">{{ pretty(data.sections.language_exams) }}</pre></el-tab-pane>
+            <el-tab-pane label="目标大学/专业"><pre class="gq-pre">{{ pretty(data.sections.goals) }}</pre></el-tab-pane>
+          </el-tabs>
+        </section>
+        <section class="gq-panel block">
+          <h3>资格结果</h3>
+          <el-alert
+            v-if="data.eligibility?.mapping_status === 'UNRESOLVED'"
+            type="warning"
+            :closable="false"
+            title="历史资格记录尚未绑定到具体学生"
+            :description="data.eligibility.message"
+            style="margin-bottom:10px"
+          />
+          <el-tag>{{ data.eligibility?.mapping_status }}</el-tag>
+          <div style="margin-top:8px"><strong>国际生：</strong>{{ data.eligibility?.international?.conclusion || '—' }}</div>
+          <div><strong>华侨生：</strong>{{ data.eligibility?.huaqiao?.conclusion || '—' }}</div>
+        </section>
+        <section class="gq-panel block">
+          <h3>时间线</h3>
+          <el-table :data="data.timeline || []" size="small">
+            <el-table-column prop="title" label="事项" />
+            <el-table-column prop="deadline" label="截止" width="120" />
+            <el-table-column prop="status" label="状态" width="120" />
+          </el-table>
+        </section>
+      </div>
+
+      <aside class="gq-panel ai-panel">
+        <h2 style="margin-top:0">AI 专家工作台</h2>
+        <p class="gq-muted">student_id={{ data.student_id }} · 输出强制 DRAFT · {{ data.ai_provider?.AI_PROVIDER }}</p>
+        <div style="margin:12px 0;display:flex;flex-wrap:wrap;gap:8px">
+          <el-button
+            v-for="(label, kind) in kinds"
+            :key="kind"
+            size="small"
+            :loading="generating === kind"
+            @click="generate(kind)"
+          >生成·{{ label }}</el-button>
         </div>
-        <div>
-          <strong>华侨生：</strong>
-          <span>{{ data.eligibility?.huaqiao?.conclusion || '—' }}</span>
+        <div class="flow gq-muted">AI Generate → DRAFT → 编辑/提交审核 → APPROVED → PUBLISHED</div>
+        <div v-if="activeDraft" style="margin-top:12px">
+          <el-tag :type="statusType(activeDraft.status)" effect="dark">{{ activeDraft.status }}</el-tag>
+          <span class="gq-muted" style="margin-left:8px">
+            {{ activeDraft.report_kind }} · {{ activeDraft.ai_provider }}/{{ activeDraft.ai_model }}
+            · v{{ activeDraft.version_count || 0 }}
+          </span>
+          <el-input v-model="editContent" type="textarea" :rows="12" style="margin-top:8px" />
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <el-button size="small" @click="saveEdit">编辑/提交审核</el-button>
+            <el-button size="small" type="success" @click="approve">批准</el-button>
+            <el-button size="small" type="danger" @click="publish">发布</el-button>
+          </div>
+          <p v-if="msg" class="gq-muted" style="margin-top:8px">{{ msg }}</p>
         </div>
-      </section>
-      <section class="gq-panel block">
-        <h3>10. 时间线</h3>
-        <el-table :data="data.timeline || []" size="small">
-          <el-table-column prop="title" label="事项" />
-          <el-table-column prop="deadline" label="截止" width="120" />
-          <el-table-column prop="status" label="状态" width="120" />
-          <el-table-column prop="university_name" label="院校" />
-        </el-table>
-      </section>
-      <section class="gq-panel block">
-        <h3>11. 历史咨询</h3>
-        <el-tag>{{ data.consultations?.mapping_status }}</el-tag>
-        <el-table :data="data.consultations?.db_consultations || []" size="small" style="margin-top:8px">
-          <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column prop="title" label="标题" />
-          <el-table-column prop="status" label="状态" width="120" />
-        </el-table>
-      </section>
-      <section class="gq-panel block">
-        <h3>12. 顾问备注</h3>
-        <p class="gq-muted">{{ data.consultant_notes?.message }}</p>
-      </section>
+      </aside>
     </div>
 
-    <!-- AI Expert Workspace -->
-    <aside class="gq-panel ai-panel">
-      <h2 style="margin-top:0">AI 专家工作台</h2>
-      <p class="gq-muted">仅读取 student_id={{ data.student_id }} · 输出强制 DRAFT</p>
-      <el-tag type="warning">{{ data.ai_provider?.AI_PROVIDER || 'LOCAL_TEMPLATE' }}</el-tag>
-      <div style="margin:12px 0;display:flex;flex-wrap:wrap;gap:8px">
-        <el-button
-          v-for="(label, kind) in kinds"
-          :key="kind"
-          size="small"
-          :loading="generating === kind"
-          @click="generate(kind)"
-        >{{ label }}</el-button>
-      </div>
-      <div class="flow gq-muted">流程：AI Generate → Draft → Edit → Approve → Publish</div>
-      <div v-if="activeDraft" style="margin-top:12px">
-        <span class="gq-draft-tag">{{ activeDraft.status }}</span>
-        <span class="gq-muted" style="margin-left:8px">{{ activeDraft.title }} · {{ activeDraft.ai_provider }}</span>
-        <el-input
-          v-model="editContent"
-          type="textarea"
-          :rows="14"
-          style="margin-top:8px"
-        />
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <el-button size="small" @click="saveEdit">保存编辑</el-button>
-          <el-button size="small" type="success" @click="approve">批准</el-button>
-          <el-button size="small" type="danger" @click="publish">尝试发布</el-button>
-        </div>
-        <p v-if="msg" class="gq-muted" style="margin-top:8px">{{ msg }}</p>
-      </div>
-      <div style="margin-top:16px">
-        <h4>本学生草稿</h4>
-        <el-table :data="drafts" size="small" @row-click="selectDraft" style="cursor:pointer">
-          <el-table-column prop="id" label="ID" width="90" />
-          <el-table-column prop="report_kind" label="类型" />
-          <el-table-column prop="status" label="状态" width="100" />
-        </el-table>
-      </div>
-    </aside>
+    <section class="gq-panel" style="margin-top:16px">
+      <h3>Consultation History</h3>
+      <el-table :data="history" size="small" @row-click="selectDraft" style="cursor:pointer">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="report_kind" label="report_kind" width="160" />
+        <el-table-column label="status" width="120">
+          <template #default="{ row }">
+            <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-tag v-if="row.status === 'PUBLISHED'" type="success" size="small" style="margin-left:4px">已发布</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="provider/model" min-width="180">
+          <template #default="{ row }">{{ row.ai_provider }}/{{ row.ai_model }}</template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="created_at" width="170" />
+        <el-table-column prop="updated_at" label="updated_at" width="170" />
+        <el-table-column prop="version_count" label="versions" width="90" />
+      </el-table>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
 
@@ -125,30 +110,38 @@ const editContent = ref('')
 const generating = ref('')
 const msg = ref('')
 
+const history = computed(() => drafts.value || [])
+
 function pretty(v) {
   return JSON.stringify(v ?? {}, null, 2)
+}
+function statusType(s) {
+  if (s === 'PUBLISHED') return 'success'
+  if (s === 'APPROVED') return 'warning'
+  if (s === 'REVIEWED') return 'info'
+  return ''
 }
 
 async function load() {
   data.value = await api.student360(props.studentId)
-  const k = await api.aiKinds(props.studentId)
-  kinds.value = k.report_kinds || {}
+  kinds.value = data.value.report_kinds || {}
   await refreshDrafts()
 }
 
 async function refreshDrafts() {
   const d = await api.aiDrafts(props.studentId)
   drafts.value = d.drafts || []
+  if (!kinds.value || !Object.keys(kinds.value).length) kinds.value = d.report_kinds || {}
 }
 
 async function generate(kind) {
   generating.value = kind
   msg.value = ''
   try {
-    const res = await api.aiGenerate(props.studentId, kind)
+    const res = await api.aiGenerate(props.studentId, kind, false)
     activeDraft.value = res.draft
-    editContent.value = res.draft.content
-    ElMessage.success('已生成 DRAFT（未发布）')
+    editContent.value = res.draft.raw_draft || res.draft.content || ''
+    ElMessage.success('已生成并持久化 DRAFT（未发布）')
     await refreshDrafts()
   } catch (e) {
     ElMessage.error(e.message)
@@ -159,29 +152,33 @@ async function generate(kind) {
 
 function selectDraft(row) {
   activeDraft.value = row
-  editContent.value = row.content
+  editContent.value = row.raw_draft || row.final_report || ''
 }
 
 async function saveEdit() {
-  const res = await api.aiEdit(props.studentId, activeDraft.value.id, editContent.value)
+  const res = await api.aiEdit(props.studentId, activeDraft.value.id, editContent.value, true)
   activeDraft.value = res.draft
-  msg.value = '已保存编辑（仍为 DRAFT）'
+  msg.value = `已保存 → ${res.draft.status}`
   await refreshDrafts()
 }
 
 async function approve() {
   const res = await api.aiApprove(props.studentId, activeDraft.value.id)
   activeDraft.value = res.draft
-  msg.value = '已批准（仍未发布给学生）'
+  msg.value = '已批准 APPROVED（学生仍不可见）'
   await refreshDrafts()
 }
 
 async function publish() {
   try {
-    await api.aiPublish(props.studentId, activeDraft.value.id)
+    const res = await api.aiPublish(props.studentId, activeDraft.value.id)
+    activeDraft.value = res.draft
+    msg.value = '已发布 PUBLISHED（学生端可读）'
+    ElMessage.success('已发布')
+    await refreshDrafts()
   } catch (e) {
     msg.value = e.message
-    ElMessage.warning('发布已拦截（缺 student_id 迁移 / V1 禁止生产写入）')
+    ElMessage.warning(e.message)
   }
 }
 

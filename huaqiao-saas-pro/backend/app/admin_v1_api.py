@@ -1,13 +1,12 @@
-"""Admin Console API V1 — /api/admin/v1/*
+"""Admin Console API V1 — frozen contract /api/admin/v1/*
 
-Read-focused Student 360 + AI Expert draft workspace.
-Never returns cipher_blob. Eligibility mapping is conservative (no cross-leak).
+Student 360 + AI Expert DRAFT→PUBLISH (student_id scoped).
+Never returns cipher_blob.
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -21,15 +20,8 @@ from .models import (
     StudentTimelineItem,
     User,
 )
-from .services.admin_ai_expert import (
-    REPORT_KINDS,
-    approve_draft,
-    generate_draft,
-    list_drafts,
-    provider_status,
-    publish_draft,
-    update_draft,
-)
+from .services import admin_ai_expert as ai
+from .services import admin_audit
 from .services.admin_privacy import public_student_meta, redact_profile_for_admin
 from .services.admin_rbac import (
     rbac_proposal,
@@ -45,10 +37,23 @@ from .services.vault_crypto import decrypt_profile_json
 
 router = APIRouter(prefix="/api/admin/v1", tags=["admin-v1"])
 
+# Frozen contract path inventory (for docs/tests)
+ADMIN_V1_CONTRACT = [
+    "GET /api/admin/v1/dashboard",
+    "GET /api/admin/v1/users",
+    "GET /api/admin/v1/users/{user_id}",
+    "GET /api/admin/v1/students",
+    "GET /api/admin/v1/students/{student_id}",
+    "GET /api/admin/v1/students/{student_id}/timeline",
+    "GET /api/admin/v1/students/{student_id}/eligibility",
+    "GET /api/admin/v1/students/{student_id}/consultations",
+    "POST /api/admin/v1/students/{student_id}/ai-drafts",
+    "GET /api/admin/v1/students/{student_id}/ai-drafts",
+    "PATCH /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}",
+    "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/approve",
+    "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/publish",
+]
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _decrypt_student_profile(row: StudentMasterProfile) -> dict:
     if not row.cipher_blob:
@@ -90,85 +95,51 @@ def _console_role_str(admin: User) -> str:
     return r.value if r else "unknown"
 
 
-def _map_legacy_eligibility(db: Session, student: StudentMasterProfile) -> dict:
-    """eligibility_records are user-scoped — never guess across multi-student accounts."""
-    siblings = (
-        db.query(StudentMasterProfile)
-        .filter(
-            StudentMasterProfile.user_id == student.user_id,
-            StudentMasterProfile.status != "DELETED",
-        )
-        .all()
-    )
-    sibling_count = len(siblings)
-    records = (
+def _ser_eligibility(r: EligibilityRecord, mapping_status: str) -> dict:
+    raw = r.raw_input or "{}"
+    try:
+        raw_obj = json.loads(raw) if isinstance(raw, str) else {}
+    except json.JSONDecodeError:
+        raw_obj = {}
+    from .services.privacy import mask_sensitive_fields
+
+    raw_masked = mask_sensitive_fields(raw_obj) if isinstance(raw_obj, dict) else {}
+    return {
+        "id": r.id,
+        "eligibility_type": r.eligibility_type,
+        "qualified": r.qualified,
+        "conclusion": r.conclusion,
+        "reasons": r.reasons,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "raw_input_masked": raw_masked,
+        "mapping_status": mapping_status,
+        "student_id": r.student_id,
+    }
+
+
+def _map_eligibility(db: Session, student: StudentMasterProfile) -> dict:
+    """Prefer student_id-scoped rows; never guess legacy user-scoped across siblings."""
+    scoped = (
         db.query(EligibilityRecord)
-        .filter(EligibilityRecord.user_id == student.user_id)
+        .filter(EligibilityRecord.student_id == student.id)
         .order_by(EligibilityRecord.created_at.desc())
         .limit(50)
         .all()
     )
-
-    def _ser(r: EligibilityRecord) -> dict:
-        raw = r.raw_input or "{}"
-        try:
-            raw_obj = json.loads(raw) if isinstance(raw, str) else {}
-        except json.JSONDecodeError:
-            raw_obj = {}
-        # Mask passport-like fields in raw_input
-        from .services.privacy import mask_sensitive_fields
-
-        raw_masked = mask_sensitive_fields(raw_obj) if isinstance(raw_obj, dict) else {}
-        return {
-            "id": r.id,
-            "eligibility_type": r.eligibility_type,
-            "qualified": r.qualified,
-            "conclusion": r.conclusion,
-            "reasons": r.reasons,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "raw_input_masked": raw_masked,
-            "mapping_status": "LEGACY_USER_SCOPED",
-            "student_id": None,
-        }
-
-    if sibling_count > 1:
-        return {
-            "mapping_status": "UNRESOLVED",
-            "message": "历史资格记录尚未绑定到具体学生",
-            "reason": "owner_has_multiple_students",
-            "student_count_for_owner": sibling_count,
-            "legacy_record_count": len(records),
-            "international": None,
-            "huaqiao": None,
-            "records": [],
-        }
-
-    if sibling_count == 1 and records:
-        items = [_ser(r) for r in records]
+    if scoped:
+        items = [_ser_eligibility(r, "STUDENT_SCOPED") for r in scoped]
         intl = next((x for x in items if x["eligibility_type"] == "international"), None)
         hq = next((x for x in items if x["eligibility_type"] in ("huaqiao", "overseas_chinese")), None)
         return {
-            "mapping_status": "LEGACY_USER_SCOPED",
-            "message": "资格记录按 user_id 关联；当前用户仅有一名学生，只读回退展示。",
-            "student_count_for_owner": 1,
-            "legacy_record_count": len(records),
+            "mapping_status": "STUDENT_SCOPED",
+            "message": "资格记录已绑定 student_id",
+            "student_count_for_owner": None,
+            "legacy_record_count": 0,
             "international": intl,
             "huaqiao": hq,
             "records": items,
         }
 
-    return {
-        "mapping_status": "EMPTY",
-        "message": "无历史资格记录",
-        "student_count_for_owner": sibling_count,
-        "legacy_record_count": 0,
-        "international": None,
-        "huaqiao": None,
-        "records": [],
-    }
-
-
-def _map_legacy_consultations(db: Session, student: StudentMasterProfile) -> dict:
     siblings = (
         db.query(StudentMasterProfile)
         .filter(
@@ -177,42 +148,113 @@ def _map_legacy_consultations(db: Session, student: StudentMasterProfile) -> dic
         )
         .count()
     )
-    mem = list_drafts(student.id)
+    legacy = (
+        db.query(EligibilityRecord)
+        .filter(EligibilityRecord.user_id == student.user_id, EligibilityRecord.student_id.is_(None))
+        .order_by(EligibilityRecord.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
     if siblings > 1:
         return {
             "mapping_status": "UNRESOLVED",
-            "message": "历史一对一咨询按 user_id 存储，多学生时禁止归属猜测",
-            "db_consultations": [],
-            "ai_drafts": mem,
+            "message": "历史资格记录尚未绑定到具体学生",
+            "reason": "owner_has_multiple_students",
+            "student_count_for_owner": siblings,
+            "legacy_record_count": len(legacy),
+            "international": None,
+            "huaqiao": None,
+            "records": [],
         }
-    rows = (
+
+    if siblings == 1 and legacy:
+        items = [_ser_eligibility(r, "LEGACY_USER_SCOPED") for r in legacy]
+        intl = next((x for x in items if x["eligibility_type"] == "international"), None)
+        hq = next((x for x in items if x["eligibility_type"] in ("huaqiao", "overseas_chinese")), None)
+        return {
+            "mapping_status": "LEGACY_USER_SCOPED",
+            "message": "资格记录按 user_id 关联；当前用户仅有一名学生，只读回退展示。",
+            "student_count_for_owner": 1,
+            "legacy_record_count": len(legacy),
+            "international": intl,
+            "huaqiao": hq,
+            "records": items,
+        }
+
+    return {
+        "mapping_status": "EMPTY",
+        "message": "无历史资格记录",
+        "student_count_for_owner": siblings,
+        "legacy_record_count": 0,
+        "international": None,
+        "huaqiao": None,
+        "records": [],
+    }
+
+
+def _map_consultations(db: Session, student: StudentMasterProfile) -> dict:
+    student_rows = ai.list_for_student(db, student.id)
+    siblings = (
+        db.query(StudentMasterProfile)
+        .filter(
+            StudentMasterProfile.user_id == student.user_id,
+            StudentMasterProfile.status != "DELETED",
+        )
+        .count()
+    )
+    legacy = (
         db.query(ExpertConsultation)
-        .filter(ExpertConsultation.user_id == student.user_id)
+        .filter(ExpertConsultation.user_id == student.user_id, ExpertConsultation.student_id.is_(None))
         .order_by(ExpertConsultation.created_at.desc())
         .limit(50)
         .all()
     )
-    return {
-        "mapping_status": "LEGACY_USER_SCOPED" if rows else "EMPTY",
-        "db_consultations": [
+    legacy_out = []
+    legacy_status = "EMPTY"
+    if siblings > 1 and legacy:
+        legacy_status = "UNRESOLVED"
+    elif siblings == 1 and legacy:
+        legacy_status = "LEGACY_USER_SCOPED"
+        legacy_out = [
             {
                 "id": r.id,
                 "title": r.title,
                 "status": r.status,
                 "student_id": None,
                 "mapping_status": "LEGACY_USER_SCOPED",
+                "report_kind": r.report_kind or "",
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "published_at": r.published_at.isoformat() if r.published_at else None,
             }
-            for r in rows
-        ],
-        "ai_drafts": mem,
+            for r in legacy
+        ]
+    elif siblings > 1:
+        legacy_status = "UNRESOLVED"
+
+    return {
+        "mapping_status": "STUDENT_SCOPED" if student_rows else legacy_status,
+        "message": "student_id 绑定咨询优先；多学生时不猜测 legacy user 级记录",
+        "consultations": student_rows,
+        "ai_drafts": student_rows,  # alias for UI
+        "db_consultations": legacy_out,
+        "legacy_mapping_status": legacy_status,
     }
 
 
-# ---------------------------------------------------------------------------
-# Auth / meta
-# ---------------------------------------------------------------------------
+def _timeline_for(db: Session, student_id: int) -> list[dict]:
+    rows = db.query(StudentTimelineItem).filter(StudentTimelineItem.student_id == student_id).all()
+    for t in rows:
+        if t.student_id != student_id:
+            raise HTTPException(status_code=500, detail="timeline isolation violation")
+    rows.sort(key=lambda r: ((r.deadline.isoformat() if r.deadline else "9999-12-31"), r.id or 0))
+    return [serialize_item(t) for t in rows]
+
+
+@router.get("/contract")
+def contract(_: User = Depends(require_admin_console)):
+    return {"contract": ADMIN_V1_CONTRACT, "version": "v1-phase3"}
+
 
 @router.get("/me")
 def admin_me(admin: User = Depends(require_admin_console)):
@@ -221,13 +263,10 @@ def admin_me(admin: User = Depends(require_admin_console)):
         "user": _user_brief(admin),
         "console_role": console.value if console else None,
         "rbac": rbac_proposal(),
-        "ai_provider": provider_status(),
+        "ai_provider": ai.provider_status(),
+        "contract": ADMIN_V1_CONTRACT,
     }
 
-
-# ---------------------------------------------------------------------------
-# Dashboard
-# ---------------------------------------------------------------------------
 
 @router.get("/dashboard")
 def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: Session = Depends(get_db)):
@@ -250,15 +289,14 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
     student_count = db.query(StudentMasterProfile).filter(StudentMasterProfile.status != "DELETED").count()
     pending_review = (
         db.query(ExpertConsultation)
-        .filter(ExpertConsultation.status.in_(["draft_ready", "pending_ai", "pending_review"]))
+        .filter(
+            ExpertConsultation.status.in_(
+                ["draft_ready", "pending_ai", "pending_review", ai.STATUS_DRAFT, ai.STATUS_REVIEWED, ai.STATUS_APPROVED]
+            )
+        )
         .count()
     )
-    recent = (
-        db.query(ExpertConsultation)
-        .order_by(ExpertConsultation.created_at.desc())
-        .limit(10)
-        .all()
-    )
+    recent = db.query(ExpertConsultation).order_by(ExpertConsultation.created_at.desc()).limit(10).all()
     return {
         "total_users": total_users,
         "trial_users": trial_users,
@@ -270,8 +308,10 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
             {
                 "id": r.id,
                 "user_id": r.user_id,
+                "student_id": r.student_id,
                 "title": r.title,
                 "status": r.status,
+                "report_kind": r.report_kind,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in recent
@@ -279,10 +319,6 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
         "bi": "simple_v1",
     }
 
-
-# ---------------------------------------------------------------------------
-# Users
-# ---------------------------------------------------------------------------
 
 @router.get("/users")
 def list_users(
@@ -325,15 +361,8 @@ def get_user(
     )
     brief = _user_brief(u)
     brief["student_count"] = len(students)
-    return {
-        "user": brief,
-        "students": [public_student_meta(s) for s in students],
-    }
+    return {"user": brief, "students": [public_student_meta(s) for s in students]}
 
-
-# ---------------------------------------------------------------------------
-# Students
-# ---------------------------------------------------------------------------
 
 @router.get("/students")
 def list_students(
@@ -353,7 +382,6 @@ def list_students(
         owner = db.query(User).filter(User.id == s.user_id).first()
         meta = public_student_meta(s)
         meta["owner"] = {"id": owner.id, "email": owner.email, "name": owner.name} if owner else None
-        # Goal hints without full decrypt leak: light decrypt for search/display only
         try:
             prof = _decrypt_student_profile(s)
             summary = profile_summary(prof)
@@ -381,59 +409,51 @@ def student_360(
     admin: User = Depends(require_capability("admin.student360.read")),
     db: Session = Depends(get_db),
 ):
-    """Student 360 read-only V1 — strictly keyed by student_id."""
     row = _get_student_or_404(db, student_id)
     owner = db.query(User).filter(User.id == row.user_id).first()
     role = _console_role_str(admin)
     raw = _decrypt_student_profile(row)
     profile = redact_profile_for_admin(raw, role="support" if role == "support" else "consultant")
-
-    # Never include cipher
     assert "cipher_blob" not in profile
 
-    basic = profile.get("basic_info") or {}
-    identity = profile.get("identity") or {}
-    education = profile.get("education") or {}
-    goals = profile.get("goals") or {}
-    courses = profile.get("courses") or {}
-    language = courses.get("language_exams") or []
+    eligibility = _map_eligibility(db, row)
+    consultations = _map_consultations(db, row)
+    timeline = _timeline_for(db, student_id)
 
-    eligibility = _map_legacy_eligibility(db, row)
-    consultations = _map_legacy_consultations(db, row)
-    timeline_rows = (
-        db.query(StudentTimelineItem)
-        .filter(StudentTimelineItem.student_id == student_id)
-        .all()
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.VIEW_STUDENT,
+        resource_type="student_master_profile",
+        resource_id=student_id,
+        student_id=student_id,
+        metadata={"view": "student_360"},
     )
-    timeline_rows.sort(key=lambda r: ((r.deadline.isoformat() if r.deadline else "9999-12-31"), r.id or 0))
-    # Extra isolation: timeline rows must match student_id (already filtered)
-    for t in timeline_rows:
-        if t.student_id != student_id:
-            raise HTTPException(status_code=500, detail="timeline isolation violation")
 
     return {
         "student_id": student_id,
         "meta": public_student_meta(row),
         "owner": _user_brief(owner),
         "sections": {
-            "basic_info": basic,
-            "identity": identity,
-            "education": education,
-            "language_exams": language,
-            "goals": goals,
+            "basic_info": profile.get("basic_info") or {},
+            "identity": profile.get("identity") or {},
+            "education": profile.get("education") or {},
+            "language_exams": (profile.get("courses") or {}).get("language_exams") or [],
+            "goals": profile.get("goals") or {},
             "planning": profile.get("planning") or {},
             "summary": profile.get("summary") or profile_summary(raw),
         },
         "eligibility": eligibility,
-        "timeline": [serialize_item(t) for t in timeline_rows],
+        "timeline": timeline,
         "consultations": consultations,
         "consultant_notes": {
             "placeholder": True,
             "notes": [],
-            "message": "顾问备注将在 Phase 3 持久化",
+            "message": "顾问备注将在后续阶段持久化",
         },
         "privacy": profile.get("_privacy") or {"masked": True},
-        "ai_provider": provider_status(),
+        "ai_provider": ai.provider_status(),
+        "report_kinds": ai.REPORT_KINDS,
     }
 
 
@@ -444,13 +464,7 @@ def student_timeline(
     db: Session = Depends(get_db),
 ):
     _get_student_or_404(db, student_id)
-    rows = (
-        db.query(StudentTimelineItem)
-        .filter(StudentTimelineItem.student_id == student_id)
-        .all()
-    )
-    rows.sort(key=lambda r: ((r.deadline.isoformat() if r.deadline else "9999-12-31"), r.id or 0))
-    return {"student_id": student_id, "timeline": [serialize_item(t) for t in rows]}
+    return {"student_id": student_id, "timeline": _timeline_for(db, student_id)}
 
 
 @router.get("/students/{student_id}/eligibility")
@@ -460,7 +474,7 @@ def student_eligibility(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
-    return {"student_id": student_id, **_map_legacy_eligibility(db, row)}
+    return {"student_id": student_id, **_map_eligibility(db, row)}
 
 
 @router.get("/students/{student_id}/consultations")
@@ -470,118 +484,173 @@ def student_consultations(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
-    return {"student_id": student_id, **_map_legacy_consultations(db, row)}
+    return {"student_id": student_id, **_map_consultations(db, row)}
 
 
 # ---------------------------------------------------------------------------
-# AI Expert Workspace
+# AI Expert — frozen ai-drafts contract
 # ---------------------------------------------------------------------------
 
-class AiGenerateIn(BaseModel):
-    report_kind: str = Field(..., description="One of REPORT_KINDS keys")
+class AiDraftCreateIn(BaseModel):
+    report_kind: str = Field(..., description="One of REPORT_KINDS")
+    submit_review: bool = False
 
 
-class AiEditIn(BaseModel):
-    content: str
+class AiDraftPatchIn(BaseModel):
+    content: str | None = None
+    payload: dict | None = None
+    submit_review: bool = True
 
 
-@router.get("/students/{student_id}/ai/report-kinds")
-def ai_report_kinds(
+@router.get("/students/{student_id}/ai-drafts")
+def list_ai_drafts(
     student_id: int,
     admin: User = Depends(require_capability("admin.ai.generate")),
     db: Session = Depends(get_db),
 ):
     _get_student_or_404(db, student_id)
-    return {"student_id": student_id, "report_kinds": REPORT_KINDS, "ai_provider": provider_status()}
+    drafts = ai.list_for_student(db, student_id)
+    return {
+        "student_id": student_id,
+        "drafts": drafts,
+        "report_kinds": ai.REPORT_KINDS,
+        "ai_provider": ai.provider_status(),
+    }
 
 
-@router.get("/students/{student_id}/ai/drafts")
-def ai_list_drafts(
+@router.post("/students/{student_id}/ai-drafts")
+async def create_ai_draft(
     student_id: int,
-    admin: User = Depends(require_capability("admin.ai.generate")),
-    db: Session = Depends(get_db),
-):
-    _get_student_or_404(db, student_id)
-    return {"student_id": student_id, "drafts": list_drafts(student_id)}
-
-
-@router.post("/students/{student_id}/ai/generate")
-async def ai_generate(
-    student_id: int,
-    body: AiGenerateIn,
+    body: AiDraftCreateIn,
     admin: User = Depends(require_capability("admin.ai.generate")),
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
-    owner = db.query(User).filter(User.id == row.user_id).first()
-    # Isolation: decrypt ONLY this student row
-    profile = _decrypt_student_profile(row)
-    # Cross-leak guard: ensure we did not load another student's id
     if row.id != student_id:
         raise HTTPException(status_code=500, detail="student_id isolation violation")
-
+    profile = _decrypt_student_profile(row)
+    timeline = _timeline_for(db, student_id)
+    eligibility = _map_eligibility(db, row)
     try:
-        draft = await generate_draft(
-            student_id=student_id,
+        draft = await ai.create_ai_draft(
+            db,
+            student=row,
             report_kind=body.report_kind,
             profile=profile,
-            actor_user_id=admin.id,
-            owner={"id": owner.id, "email": owner.email} if owner else None,
+            actor=admin,
+            timeline=timeline,
+            eligibility=eligibility,
+            mark_reviewed=body.submit_review,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    assert draft["status"] == "DRAFT"
-    assert draft["published"] is False
-    assert draft["auto_published"] is False
-    return {"student_id": student_id, "draft": draft, "flow": "AI_GENERATE→DRAFT→EDIT→APPROVE→PUBLISH"}
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.AI_GENERATE,
+        resource_type="expert_consultation",
+        resource_id=draft["id"],
+        student_id=student_id,
+        metadata={"report_kind": body.report_kind, "status": draft["status"], "provider": draft.get("ai_provider")},
+    )
+    return {
+        "student_id": student_id,
+        "draft": draft,
+        "flow": "AI_GENERATE→DRAFT→REVIEWED→APPROVED→PUBLISHED",
+    }
 
 
-@router.patch("/students/{student_id}/ai/drafts/{draft_id}")
-def ai_edit_draft(
+@router.patch("/students/{student_id}/ai-drafts/{draft_id}")
+def patch_ai_draft(
     student_id: int,
-    draft_id: str,
-    body: AiEditIn,
+    draft_id: int,
+    body: AiDraftPatchIn,
     admin: User = Depends(require_capability("admin.ai.edit")),
     db: Session = Depends(get_db),
 ):
     _get_student_or_404(db, student_id)
-    updated = update_draft(student_id, draft_id, body.content, admin.id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="草稿不存在")
-    return {"student_id": student_id, "draft": updated}
-
-
-@router.post("/students/{student_id}/ai/drafts/{draft_id}/approve")
-def ai_approve(
-    student_id: int,
-    draft_id: str,
-    admin: User = Depends(require_capability("admin.ai.approve")),
-    db: Session = Depends(get_db),
-):
-    _get_student_or_404(db, student_id)
-    updated = approve_draft(student_id, draft_id, admin.id)
-    if not updated:
-        raise HTTPException(status_code=404, detail="草稿不存在")
-    assert updated["published"] is False
-    return {"student_id": student_id, "draft": updated}
-
-
-@router.post("/students/{student_id}/ai/drafts/{draft_id}/publish")
-def ai_publish(
-    student_id: int,
-    draft_id: str,
-    admin: User = Depends(require_capability("admin.ai.publish")),
-    db: Session = Depends(get_db),
-):
-    _get_student_or_404(db, student_id)
     try:
-        publish_draft(student_id, draft_id, admin.id)
+        updated = ai.edit_draft(
+            db,
+            student_id=student_id,
+            draft_id=draft_id,
+            actor=admin,
+            content=body.content,
+            payload=body.payload,
+            mark_reviewed=body.submit_review,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="草稿不存在") from None
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    raise HTTPException(status_code=409, detail="PUBLISH_BLOCKED")
+
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.AI_EDIT,
+        resource_type="expert_consultation",
+        resource_id=draft_id,
+        student_id=student_id,
+        metadata={"status": updated["status"]},
+    )
+    return {"student_id": student_id, "draft": updated}
+
+
+@router.post("/students/{student_id}/ai-drafts/{draft_id}/approve")
+def approve_ai_draft(
+    student_id: int,
+    draft_id: int,
+    admin: User = Depends(require_capability("admin.ai.approve")),
+    db: Session = Depends(get_db),
+):
+    _get_student_or_404(db, student_id)
+    try:
+        updated = ai.approve_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="草稿不存在") from None
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    assert updated["published"] is False
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.AI_APPROVE,
+        resource_type="expert_consultation",
+        resource_id=draft_id,
+        student_id=student_id,
+        metadata={"status": updated["status"]},
+    )
+    return {"student_id": student_id, "draft": updated}
+
+
+@router.post("/students/{student_id}/ai-drafts/{draft_id}/publish")
+def publish_ai_draft(
+    student_id: int,
+    draft_id: int,
+    admin: User = Depends(require_capability("admin.ai.publish")),
+    db: Session = Depends(get_db),
+):
+    """Publish only APPROVED drafts bound to this student_id. Never auto from AI."""
+    _get_student_or_404(db, student_id)
+    try:
+        updated = ai.publish_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="草稿不存在") from None
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.AI_PUBLISH,
+        resource_type="expert_consultation",
+        resource_id=draft_id,
+        student_id=student_id,
+        metadata={"status": updated["status"]},
+    )
+    return {"student_id": student_id, "draft": updated}
 
 
 @router.get("/settings")
@@ -589,7 +658,8 @@ def settings_view(admin: User = Depends(require_capability("admin.settings"))):
     return {
         "admin_domain": "https://admin.guoqiaoplan.com",
         "rbac": rbac_proposal(),
-        "ai_provider": provider_status(),
+        "ai_provider": ai.provider_status(),
+        "contract": ADMIN_V1_CONTRACT,
         "migration_status": {
             "draft_file": "alembic/drafts/007_admin_ai_expert_v1_NOT_APPLIED.py",
             "applied": False,

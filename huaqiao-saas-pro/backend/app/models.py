@@ -104,6 +104,8 @@ class EligibilityRecord(Base):
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    # Phase 3 / draft 007: nullable until backfill; new writes should set student_id.
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
     eligibility_type = Column(String(30), index=True, nullable=False)
     qualified = Column(Boolean, nullable=False)
     conclusion = Column(String(200), nullable=False)
@@ -202,20 +204,28 @@ class StudentTimelineItem(Base):
 
 
 class ExpertConsultation(Base):
-    """一对一专家咨询：付费提交 → 系统自动生成初稿 → 人工审核下发。"""
+    """一对一专家咨询 / Admin AI Expert：DRAFT → REVIEWED → APPROVED → PUBLISHED。"""
     __tablename__ = "expert_consultations"
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    # Admin AI Expert V1 — required for safe multi-student isolation on new writes.
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    assigned_consultant_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     title = Column(String(200), default="")
     question = Column(Text, default="")
     personalization = Column(Text, default="")
     contact_phone = Column(String(40), default="")
     contact_email = Column(String(160), default="")
     contact_wechat = Column(String(80), default="")
+    # Legacy: pending_ai/draft_ready/published; Admin V1: DRAFT/REVIEWED/APPROVED/PUBLISHED/ARCHIVED
     status = Column(String(30), default="pending_ai", index=True)
+    report_kind = Column(String(60), default="", index=True)
+    ai_provider = Column(String(40), default="")
     ai_draft = Column(Text, default="")
     ai_model = Column(String(120), default="")
+    # Structured AI payload JSON (summary/risk_items/...) — never contains full ID/passport.
+    payload_json = Column(Text, default="{}")
     final_report = Column(Text, default="")
     admin_note = Column(Text, default="")
     reviewed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -230,8 +240,22 @@ class ConsultationReportVersion(Base):
     consultation_id = Column(Integer, ForeignKey("expert_consultations.id"), index=True, nullable=False)
     version_no = Column(Integer, default=1)
     content = Column(Text, default="")
+    # ai | ai_draft | edited | approved | published | admin_edit (legacy)
     source = Column(String(30), default="ai")
     editor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AuditEvent(Base):
+    """Durable admin/privacy audit (replaces in-memory-only AuditLogger for Admin V1)."""
+    __tablename__ = "audit_events"
+    id = Column(Integer, primary_key=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    action = Column(String(80), nullable=False, index=True)
+    resource_type = Column(String(80), nullable=False, default="")
+    resource_id = Column(String(120), nullable=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    metadata_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
