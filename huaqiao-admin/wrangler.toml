@@ -1,0 +1,12 @@
+name = "guoqiao-admin"
+compatibility_date = "2025-09-04"
+workers_dev = true
+
+[[routes]]
+pattern = "admin.guoqiaoplan.com"
+custom_domain = true
+
+[assets]
+# Relative to this config file (huaqiao-admin/)
+directory = "./dist"
+not_found_handling = "single-page-application"
