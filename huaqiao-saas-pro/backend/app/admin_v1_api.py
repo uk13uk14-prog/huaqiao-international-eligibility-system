@@ -323,8 +323,20 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
     recent = db.query(ExpertConsultation).order_by(ExpertConsultation.created_at.desc()).limit(10).all()
     scoped_assignee = admin.id if consultant_scoped(admin) else None
     role = resolve_console_role(admin)
+    my_students = None
+    if scoped_assignee:
+        my_students = (
+            db.query(StudentMasterProfile)
+            .filter(
+                StudentMasterProfile.assignee_user_id == admin.id,
+                StudentMasterProfile.status != "DELETED",
+            )
+            .count()
+        )
     return {
         "dashboard_role": role.value if role else None,
+        "scope": "assignee" if scoped_assignee else "org",
+        "my_students": my_students,
         "total_users": total_users,
         "trial_users": trial_users,
         "paid_users": paid_users,
@@ -575,7 +587,8 @@ def student_timeline(
     admin: User = Depends(require_capability("admin.student360.read")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, "timeline": _timeline_for(db, student_id)}
 
 
@@ -586,6 +599,7 @@ def student_eligibility(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, **_map_eligibility(db, row)}
 
 
@@ -596,6 +610,7 @@ def student_consultations(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, **_map_consultations(db, row)}
 
 
@@ -620,7 +635,8 @@ def list_ai_drafts(
     admin: User = Depends(require_capability("admin.ai.generate")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     drafts = ai.list_for_student(db, student_id)
     return {
         "student_id": student_id,
@@ -638,6 +654,7 @@ async def create_ai_draft(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     if row.id != student_id:
         raise HTTPException(status_code=500, detail="student_id isolation violation")
     profile = _decrypt_student_profile(row)
@@ -685,7 +702,8 @@ def patch_ai_draft(
     admin: User = Depends(require_capability("admin.ai.edit")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.edit_draft(
             db,
@@ -720,7 +738,8 @@ def approve_ai_draft(
     admin: User = Depends(require_capability("admin.ai.approve")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.approve_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
     except KeyError:
@@ -749,7 +768,8 @@ def publish_ai_draft(
     db: Session = Depends(get_db),
 ):
     """Publish only APPROVED drafts bound to this student_id. Never auto from AI."""
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.publish_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
     except KeyError:
@@ -996,6 +1016,7 @@ def ai_follow_up_drafts(
 ):
     """AI follow-up suggestions — DRAFT only, never auto-send."""
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     raw = _decrypt_student_profile(row)
     snap = crm.crm_snapshot(db, row, raw)
     drafts = crm.ai_follow_up_drafts(student_id=student_id, crm=snap)

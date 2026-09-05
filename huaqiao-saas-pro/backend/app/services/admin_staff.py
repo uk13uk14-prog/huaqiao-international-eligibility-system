@@ -299,6 +299,14 @@ def update_employee(
         resource_id=user.id,
         metadata={"role": user.role, "job_title": user.job_title},
     )
+    admin_audit.record_audit(
+        db,
+        actor_user_id=operator.id,
+        action="EMPLOYEE_UPDATE",
+        resource_type="user",
+        resource_id=user.id,
+        metadata={"role": user.role, "job_title": user.job_title},
+    )
     return user
 
 
@@ -362,6 +370,14 @@ def mark_login(db: Session, user: User) -> None:
             db,
             actor_user_id=user.id,
             action=STAFF_LOGIN,
+            resource_type="user",
+            resource_id=user.id,
+            metadata={"role": user.role},
+        )
+        admin_audit.record_audit(
+            db,
+            actor_user_id=user.id,
+            action="LOGIN",
             resource_type="user",
             resource_id=user.id,
             metadata={"role": user.role},

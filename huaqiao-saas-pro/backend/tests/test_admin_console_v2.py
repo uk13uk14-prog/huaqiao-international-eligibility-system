@@ -162,6 +162,10 @@ def test_staff_customer_separation_and_rbac(client):
     mine2 = client.get("/api/admin/v1/students", headers=con_h).json()["students"]
     assert sid2 not in [s["id"] for s in mine2]
     assert client.get(f"/api/admin/v1/students/{sid2}", headers=con_h).status_code == 403
+    own_ai = client.post(f"/api/admin/v1/students/{sid}/ai-follow-up-drafts", headers=con_h)
+    assert own_ai.status_code == 200, own_ai.text
+    assert own_ai.json()["auto_send"] is False
+    assert client.post(f"/api/admin/v1/students/{sid2}/ai-follow-up-drafts", headers=con_h).status_code == 403
 
     # support 360 is allowed (redacted) but cannot patch crm
     s360 = client.get(f"/api/admin/v1/students/{sid}", headers=sup_h)

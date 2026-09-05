@@ -260,6 +260,15 @@ def create_follow_up(
         student_id=row.id,
         metadata={"source": src, "type": fu.type},
     )
+    admin_audit.record_audit(
+        db,
+        actor_user_id=operator.id,
+        action="FOLLOW_UP_CREATE",
+        resource_type="student_follow_up",
+        resource_id=fu.id,
+        student_id=row.id,
+        metadata={"source": src, "type": fu.type},
+    )
     return serialize_follow_up(fu, operator)
 
 
@@ -290,6 +299,7 @@ def patch_crm_fields(
     identity_track: str | None = None,
     display_name_override: str | None = None,
 ) -> dict:
+    prev_stage = row.crm_stage
     if crm_stage is not None:
         stage = crm_stage.upper()
         if stage not in CRM_STAGES:
@@ -341,6 +351,16 @@ def patch_crm_fields(
         student_id=row.id,
         metadata={"crm_stage": row.crm_stage, "risk_level": row.risk_level},
     )
+    if crm_stage is not None and row.crm_stage != prev_stage:
+        admin_audit.record_audit(
+            db,
+            actor_user_id=operator.id,
+            action="CRM_STAGE_CHANGE",
+            resource_type="student_master_profile",
+            resource_id=row.id,
+            student_id=row.id,
+            metadata={"from_stage": prev_stage, "to_stage": row.crm_stage},
+        )
     return crm_snapshot(db, row)
 
 
