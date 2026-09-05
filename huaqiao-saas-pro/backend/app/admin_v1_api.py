@@ -28,6 +28,7 @@ from .services.admin_rbac import (
     AdminConsoleRole,
     capabilities_for,
     consultant_scoped,
+    has_capability,
     menu_for,
     rbac_proposal,
     require_admin_console,
@@ -54,6 +55,7 @@ ADMIN_V1_CONTRACT = [
     "GET /api/admin/v1/students/{student_id}/timeline",
     "GET /api/admin/v1/students/{student_id}/eligibility",
     "GET /api/admin/v1/students/{student_id}/consultations",
+    "PATCH /api/admin/v1/students/{student_id}/profile-basic",
     "POST /api/admin/v1/students/{student_id}/ai-drafts",
     "GET /api/admin/v1/students/{student_id}/ai-drafts",
     "PATCH /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}",
@@ -895,6 +897,142 @@ def update_student_csca(
 
 
 # ---------------------------------------------------------------------------
+# Super-admin student basic profile (name + contact facts only)
+# ---------------------------------------------------------------------------
+
+_ALLOWED_GENDERS = frozenset(
+    {
+        "",
+        "男",
+        "女",
+        "其他",
+        "未说明",
+        "male",
+        "female",
+        "other",
+        "unspecified",
+    }
+)
+
+
+class StudentBasicProfileIn(BaseModel):
+    chinese_name: str | None = None
+    english_name: str | None = None
+    intended_entry_year: int | str | None = None
+    gender: str | None = None
+    current_country: str | None = None
+    current_city: str | None = None
+    contact: str | None = None
+    birth_date: str | None = None
+
+
+def _clean_profile_text(value: str | None, *, field: str, max_len: int, allow_email: bool = False) -> str:
+    text = str(value or "").strip()
+    if not allow_email and "@" in text:
+        raise HTTPException(status_code=400, detail=f"{field}不能使用邮箱")
+    if len(text) > max_len:
+        raise HTTPException(status_code=400, detail=f"{field}过长")
+    return text
+
+
+@router.patch("/students/{student_id}/profile-basic")
+def patch_student_profile_basic(
+    student_id: int,
+    payload: StudentBasicProfileIn,
+    admin: User = Depends(require_capability("student360.profile.write")),
+    db: Session = Depends(get_db),
+):
+    """SUPER_ADMIN only: persist student name and basic facts into the vault + display_name."""
+    from datetime import datetime as _dt
+
+    from .services.student_profile import display_name_of
+    from .services.vault_crypto import encrypt_profile_json
+
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=True)
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="没有可保存的字段")
+
+    raw = _decrypt_student_profile(row)
+    basic = dict(raw.get("basic_info") or {})
+    changed: list[str] = []
+
+    if "chinese_name" in data:
+        basic["chinese_name"] = _clean_profile_text(data["chinese_name"], field="中文姓名", max_len=80)
+        changed.append("chinese_name")
+    if "english_name" in data:
+        basic["english_name"] = _clean_profile_text(data["english_name"], field="英文名", max_len=80)
+        changed.append("english_name")
+    if "gender" in data:
+        gender = _clean_profile_text(data["gender"], field="性别", max_len=20)
+        if gender.lower() not in {g.lower() for g in _ALLOWED_GENDERS} and gender not in _ALLOWED_GENDERS:
+            raise HTTPException(status_code=400, detail="性别取值无效")
+        basic["gender"] = gender
+        changed.append("gender")
+    if "current_country" in data:
+        basic["current_country"] = _clean_profile_text(data["current_country"], field="当前国家", max_len=80)
+        changed.append("current_country")
+    if "current_city" in data:
+        basic["current_city"] = _clean_profile_text(data["current_city"], field="当前城市", max_len=80)
+        changed.append("current_city")
+    if "contact" in data:
+        basic["contact"] = _clean_profile_text(
+            data["contact"], field="联系方式", max_len=80, allow_email=True
+        )
+        changed.append("contact")
+    if "birth_date" in data:
+        birth = _clean_profile_text(data["birth_date"], field="出生日期", max_len=32)
+        if birth and len(birth) == 10 and birth[4] == "-" and birth[7] == "-":
+            try:
+                datetime.strptime(birth, "%Y-%m-%d")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="出生日期须为 YYYY-MM-DD") from exc
+        elif birth:
+            raise HTTPException(status_code=400, detail="出生日期须为 YYYY-MM-DD")
+        basic["birth_date"] = birth
+        changed.append("birth_date")
+    if "intended_entry_year" in data:
+        raw_year = data["intended_entry_year"]
+        if raw_year is None or raw_year == "":
+            basic["intended_entry_year"] = ""
+        else:
+            try:
+                year = int(raw_year)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="入学年份无效") from exc
+            if year < 2020 or year > 2035:
+                raise HTTPException(status_code=400, detail="入学年份须在 2020–2035")
+            basic["intended_entry_year"] = str(year)
+        changed.append("intended_entry_year")
+
+    raw["basic_info"] = basic
+    doc = normalize_profile(raw)
+    row.cipher_blob = encrypt_profile_json(doc)
+    row.display_name = display_name_of(doc)
+    row.updated_at = _dt.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.STUDENT_PROFILE_BASIC_UPDATE,
+        resource_type="student_master_profile",
+        resource_id=student_id,
+        student_id=student_id,
+        metadata={"view": "student_360_basic", "fields": changed},
+    )
+    return {
+        "student_id": student_id,
+        "display_name": row.display_name,
+        "basic_info": doc.get("basic_info") or {},
+        "crm": crm.crm_snapshot(db, row, doc),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Student CRM V1
 # ---------------------------------------------------------------------------
 
@@ -951,6 +1089,8 @@ def patch_student_crm(
 ):
     row = _get_student_or_404(db, student_id)
     _assert_student_visible(admin, row, write=True)
+    if payload.display_name is not None and not has_capability(admin, "student360.profile.write"):
+        raise HTTPException(status_code=403, detail="仅超级管理员可修改学生姓名")
     try:
         snap = crm.patch_crm_fields(
             db,

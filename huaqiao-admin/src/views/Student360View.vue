@@ -47,7 +47,42 @@
         <!-- Basic -->
         <section class="gq-panel block">
           <h3>基本资料 / 所属用户</h3>
-          <el-descriptions :column="2" border size="small">
+          <p v-if="canEditProfile" class="gq-muted" style="margin:0 0 10px">仅超级管理员可修改并保存学生姓名与基本资料。</p>
+          <el-form v-if="canEditProfile" :model="basicForm" label-width="96px" class="basic-form">
+            <div class="basic-grid">
+              <el-form-item label="中文姓名">
+                <el-input v-model="basicForm.chinese_name" maxlength="80" placeholder="学生中文姓名，勿填邮箱" />
+              </el-form-item>
+              <el-form-item label="英文名">
+                <el-input v-model="basicForm.english_name" maxlength="80" placeholder="English name" />
+              </el-form-item>
+              <el-form-item label="出生日期">
+                <el-input v-model="basicForm.birth_date" maxlength="10" placeholder="YYYY-MM-DD" />
+              </el-form-item>
+              <el-form-item label="性别">
+                <el-select v-model="basicForm.gender" clearable placeholder="选择性别" style="width:100%">
+                  <el-option label="男" value="男" />
+                  <el-option label="女" value="女" />
+                  <el-option label="其他" value="其他" />
+                  <el-option label="未说明" value="未说明" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="当前国家">
+                <el-input v-model="basicForm.current_country" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="当前城市">
+                <el-input v-model="basicForm.current_city" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="联系方式">
+                <el-input v-model="basicForm.contact" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="入学年份">
+                <el-input v-model="basicForm.intended_entry_year" maxlength="4" placeholder="2027" />
+              </el-form-item>
+            </div>
+            <el-button type="primary" :loading="basicSaving" @click="saveBasic">保存基本资料</el-button>
+          </el-form>
+          <el-descriptions :column="2" border size="small" :class="{ 'mt-desc': canEditProfile }">
             <el-descriptions-item label="学生姓名">{{ human(basic.chinese_name || displayName) }}</el-descriptions-item>
             <el-descriptions-item label="英文名">{{ human(basic.english_name) }}</el-descriptions-item>
             <el-descriptions-item label="出生日期">{{ humanDate(basic.birth_date) }}</el-descriptions-item>
@@ -308,6 +343,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
+import { useAdminSession } from '../composables/useAdminSession'
 import {
   EMPTY,
   human,
@@ -329,6 +365,19 @@ import {
 
 const props = defineProps({ studentId: { type: [String, Number], required: true } })
 const isDev = import.meta.env.DEV
+const { can } = useAdminSession()
+const canEditProfile = computed(() => can('student360.profile.write'))
+const basicSaving = ref(false)
+const basicForm = ref({
+  chinese_name: '',
+  english_name: '',
+  birth_date: '',
+  gender: '',
+  current_country: '',
+  current_city: '',
+  contact: '',
+  intended_entry_year: '',
+})
 
 const data = ref(null)
 const kinds = ref({})
@@ -494,6 +543,43 @@ function statusType(s) {
   return ''
 }
 
+function syncBasicForm() {
+  const b = data.value?.sections?.basic_info || {}
+  basicForm.value = {
+    chinese_name: b.chinese_name || '',
+    english_name: b.english_name || '',
+    birth_date: String(b.birth_date || '').slice(0, 10),
+    gender: b.gender || '',
+    current_country: b.current_country || '',
+    current_city: b.current_city || '',
+    contact: b.contact || '',
+    intended_entry_year: b.intended_entry_year || '',
+  }
+}
+
+async function saveBasic() {
+  if (!canEditProfile.value) {
+    ElMessage.error('仅超级管理员可修改学生姓名与基本资料')
+    return
+  }
+  const cn = String(basicForm.value.chinese_name || '')
+  const en = String(basicForm.value.english_name || '')
+  if (cn.includes('@') || en.includes('@')) {
+    ElMessage.error('姓名不能使用邮箱')
+    return
+  }
+  basicSaving.value = true
+  try {
+    await api.patchStudentBasic(props.studentId, { ...basicForm.value })
+    ElMessage.success('学生基本资料已保存')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    basicSaving.value = false
+  }
+}
+
 function syncCscaForm() {
   const c = data.value?.sections?.csca || data.value?.csca_card || {}
   cscaForm.value = {
@@ -579,6 +665,7 @@ async function load() {
     FOLLOW_UP: '持续跟进', COMPLETED: '已完成', PAUSED: '暂停',
   }
   assignTo.value = data.value.crm?.assignee_user_id || 0
+  syncBasicForm()
   syncCscaForm()
   await refreshDrafts()
   try { staff.value = (await api.staff()).staff || [] } catch { staff.value = [] }
@@ -667,6 +754,9 @@ watch(() => props.studentId, load)
 .ops-cell .k { font-size: 12px; color: #64748b; }
 .ops-cell .v { font-size: 14px; font-weight: 600; color: #142033; word-break: break-word; }
 .ops-actions, .row-edit { display: flex; flex-wrap: wrap; gap: 8px; }
+.basic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.mt-desc { margin-top: 14px; }
+.basic-form :deep(.el-form-item) { margin-bottom: 12px; }
 .elig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .elig-card { border: 1px solid #d5dde8; border-radius: 10px; padding: 12px; background: #fff; }
 .elig-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }

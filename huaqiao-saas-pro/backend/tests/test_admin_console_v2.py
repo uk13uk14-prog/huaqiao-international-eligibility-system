@@ -210,3 +210,79 @@ def test_student_create_endpoint_fallback(client):
     """If profile create path name differs, still keep admin login regression."""
     h = _admin_headers(client)
     assert client.get("/api/admin/v1/nav", headers=h).status_code == 200
+
+
+def test_only_super_admin_can_patch_student_basic_profile(client):
+    admin_h = _admin_headers(client)
+    me = client.get("/api/admin/v1/me", headers=admin_h).json()
+    assert "student360.profile.write" in me["permissions"]
+
+    cust_h, _, _ = _register_customer(client)
+    sid = _create_student(client, cust_h)
+
+    ok = client.patch(
+        f"/api/admin/v1/students/{sid}/profile-basic",
+        headers=admin_h,
+        json={
+            "chinese_name": "李华",
+            "english_name": "Li Hua",
+            "intended_entry_year": 2028,
+            "gender": "男",
+            "current_country": "美国",
+            "current_city": "纽约",
+            "contact": "13800138000",
+            "birth_date": "2008-06-01",
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["display_name"] == "李华"
+    assert body["basic_info"]["chinese_name"] == "李华"
+    assert body["basic_info"]["english_name"] == "Li Hua"
+    assert body["basic_info"]["intended_entry_year"] == "2028"
+    s360 = client.get(f"/api/admin/v1/students/{sid}", headers=admin_h)
+    assert s360.status_code == 200
+    assert s360.json()["sections"]["basic_info"]["chinese_name"] == "李华"
+    assert s360.json()["ops_header"]["display_name"] == "李华"
+
+    email_name = client.patch(
+        f"/api/admin/v1/students/{sid}/profile-basic",
+        headers=admin_h,
+        json={"chinese_name": "a@b.com"},
+    )
+    assert email_name.status_code == 400
+
+    ops, ops_email = _create_staff(client, admin_h, "operations_admin", name="运营丁")
+    con, con_email = _create_staff(client, admin_h, "consultant", name="顾问戊")
+    _, sup_email = _create_staff(client, admin_h, "support", name="客服己")
+    client.post(
+        f"/api/admin/v1/students/{sid}/assign",
+        headers=admin_h,
+        json={"assignee_user_id": con["id"]},
+    )
+
+    denied = []
+    for email in (ops_email, con_email, sup_email):
+        token = _login(client, email, "TempPass9").json()["token"]
+        h = {"Authorization": f"Bearer {token}"}
+        me_r = client.get("/api/admin/v1/me", headers=h)
+        assert me_r.status_code == 200
+        assert "student360.profile.write" not in me_r.json()["permissions"]
+        patch = client.patch(
+            f"/api/admin/v1/students/{sid}/profile-basic",
+            headers=h,
+            json={"chinese_name": "黑客改名"},
+        )
+        assert patch.status_code == 403, patch.text
+        crm_name = client.patch(
+            f"/api/admin/v1/students/{sid}/crm",
+            headers=h,
+            json={"display_name": "黑客改名"},
+        )
+        assert crm_name.status_code == 403, crm_name.text
+        denied.append(email)
+
+    assert len(denied) == 3
+    still = client.get(f"/api/admin/v1/students/{sid}", headers=admin_h).json()
+    assert still["sections"]["basic_info"]["chinese_name"] == "李华"
+    assert still["ops_header"]["display_name"] == "李华"

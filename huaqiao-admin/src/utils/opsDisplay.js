@@ -211,6 +211,7 @@ export const CAPABILITY_ZH = {
   'students.assign': '分配学生',
   'student360.read': '查看学生 360',
   'student360.write': '编辑学生 360',
+  'student360.profile.write': '修改学生姓名与基本资料（仅超管）',
   'followups.read': '查看跟进',
   'followups.write': '记录跟进',
   'consultations.read': '查看咨询',
