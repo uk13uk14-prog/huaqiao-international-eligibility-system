@@ -35,6 +35,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "${ROOT}/deploy/api/lib/notification_008_schema_guard.sh"
 # shellcheck source=deploy/api/lib/csca_009_integrity_guard.sh
 source "${ROOT}/deploy/api/lib/csca_009_integrity_guard.sh"
+# shellcheck source=deploy/api/lib/student_crm_010_schema_guard.sh
+source "${ROOT}/deploy/api/lib/student_crm_010_schema_guard.sh"
 BACKEND="${ROOT}/huaqiao-saas-pro/backend"
 ENV_FILE="${BACKEND}/.env"
 BACKUP_DIR="${HOME}/guoqiao-backups"
@@ -239,6 +241,60 @@ normalize_rev() {
   echo "$1" | grep -oE '[0-9]{3}_[a-z0-9_]+' | head -1 || true
 }
 
+# Probe real 010 CRM objects (student_follow_ups + student_master_profiles CRM cols).
+# Sets CRM010_PROBE_* to YES/NO. No writes.
+probe_010_crm_objects() {
+  CRM010_PROBE_FOLLOW_UPS="$(pg_sql "SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='student_follow_ups'
+  ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  _crm010_col() {
+    local col="$1"
+    pg_sql "SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema='public' AND table_name='student_master_profiles' AND column_name='${col}'
+    ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]'
+  }
+  CRM010_PROBE_ASSIGNEE_USER_ID="$(_crm010_col assignee_user_id)"
+  CRM010_PROBE_ASSIGNED_AT="$(_crm010_col assigned_at)"
+  CRM010_PROBE_ASSIGNED_BY_USER_ID="$(_crm010_col assigned_by_user_id)"
+  CRM010_PROBE_CRM_STAGE="$(_crm010_col crm_stage)"
+  CRM010_PROBE_RISK_LEVEL="$(_crm010_col risk_level)"
+  CRM010_PROBE_NEXT_ACTION="$(_crm010_col next_action)"
+  CRM010_PROBE_NEXT_FOLLOW_UP_AT="$(_crm010_col next_follow_up_at)"
+  CRM010_PROBE_LAST_FOLLOW_UP_AT="$(_crm010_col last_follow_up_at)"
+  CRM010_PROBE_IDENTITY_TRACK="$(_crm010_col identity_track)"
+}
+
+# Evaluate independent 010 gate from current DB probes + rule inventory.
+# Does NOT consult ALLOW_008_UPGRADE / PARTIAL_009 / ALLOW_009_UPGRADE.
+evaluate_010_release_gate() {
+  local rev="${1:-}"
+  local has_n="${2:-NO}"
+  local has_nr="${3:-NO}"
+  local has_nd="${4:-NO}"
+  local has_np="${5:-NO}"
+  local total="${6:-0}"
+  local csca="${7:-0}"
+  local non_csca="${8:-0}"
+
+  probe_010_crm_objects
+  classify_010_release_state \
+    "${rev}" \
+    "${has_n}" "${has_nr}" "${has_nd}" "${has_np}" \
+    "${total}" "${csca}" "${non_csca}" \
+    "${CRM010_PROBE_FOLLOW_UPS}" \
+    "${CRM010_PROBE_ASSIGNEE_USER_ID}" \
+    "${CRM010_PROBE_ASSIGNED_AT}" \
+    "${CRM010_PROBE_ASSIGNED_BY_USER_ID}" \
+    "${CRM010_PROBE_CRM_STAGE}" \
+    "${CRM010_PROBE_RISK_LEVEL}" \
+    "${CRM010_PROBE_NEXT_ACTION}" \
+    "${CRM010_PROBE_NEXT_FOLLOW_UP_AT}" \
+    "${CRM010_PROBE_LAST_FOLLOW_UP_AT}" \
+    "${CRM010_PROBE_IDENTITY_TRACK}"
+}
+
 # Read-only CHECKPOINT D diagnostic (no upgrade). Fail closed on tooling/binding errors.
 run_checkpoint_d_diagnostic() {
   section "CHECKPOINT D — DIAGNOSTIC (read-only)"
@@ -339,7 +395,9 @@ run_checkpoint_d_diagnostic() {
     echo "NOTE=008 schema/alembic_version inconsistency — do NOT guess; inspect 008 tables before upgrade"
   fi
 
-  # 009 rule inventory (read-only) — drives independent 009 state machine
+  # 009 rule inventory (read-only) — INFORMATIONAL ONLY for 010 release.
+  # Temporarily restore 008→009 expecteds so a healthy 009 baseline is not
+  # mislabeled PARTIAL_009 by the 010 script's EXPECTED_BEFORE=009 / AFTER=010.
   CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
   CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
   NON_CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type NOT IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
@@ -347,12 +405,36 @@ run_checkpoint_d_diagnostic() {
   echo "CSCA_RULE_COUNT_BEFORE=${CSCA_RULE_COUNT_BEFORE}"
   echo "NON_CSCA_RULE_COUNT_BEFORE=${NON_CSCA_RULE_COUNT_BEFORE}"
   echo "TOTAL_RULE_COUNT_BEFORE=${TOTAL_RULE_COUNT_BEFORE}"
+  _SAVE_EXPECTED_BEFORE="${EXPECTED_BEFORE}"
+  _SAVE_EXPECTED_AFTER="${EXPECTED_AFTER}"
+  _SAVE_EXPECTED_PRE_RULES="${EXPECTED_PRE_NOTIFICATION_RULES}"
+  EXPECTED_BEFORE="008_notification_center_v1"
+  EXPECTED_AFTER="009_csca_notification_rules"
+  EXPECTED_PRE_NOTIFICATION_RULES=27
   classify_009_release_state \
     "${DIRECT_DB_REVISION}" \
     "${CSCA_RULE_COUNT_BEFORE}" \
     "${NON_CSCA_RULE_COUNT_BEFORE}" \
     "${TOTAL_RULE_COUNT_BEFORE}"
-  echo "OLD_008_GATE_NOT_USED_FOR_009_APPLY=YES"
+  EXPECTED_BEFORE="${_SAVE_EXPECTED_BEFORE}"
+  EXPECTED_AFTER="${_SAVE_EXPECTED_AFTER}"
+  EXPECTED_PRE_NOTIFICATION_RULES="${_SAVE_EXPECTED_PRE_RULES}"
+  echo "OLD_008_GATE_INFORMATIONAL_ONLY=YES"
+  echo "OLD_009_GATE_INFORMATIONAL_ONLY=YES"
+  echo "OLD_008_GATE_NOT_USED_FOR_010_APPLY=YES"
+  echo "OLD_009_GATE_NOT_USED_FOR_010_APPLY=YES"
+
+  # --- Independent 010 release gate (sole apply authority) ---
+  echo "=== 010 RELEASE GATE ==="
+  evaluate_010_release_gate \
+    "${DIRECT_DB_REVISION}" \
+    "${HAS_NOTIFICATIONS}" \
+    "${HAS_NOTIFICATION_RULES}" \
+    "${HAS_NOTIFICATION_DEVICES}" \
+    "${HAS_NOTIFICATION_PREFERENCES}" \
+    "${TOTAL_RULE_COUNT_BEFORE}" \
+    "${CSCA_RULE_COUNT_BEFORE}" \
+    "${NON_CSCA_RULE_COUNT_BEFORE}"
 
   # Alembic current/heads via bound .venv (stderr captured — never discarded)
   set +e
@@ -395,9 +477,17 @@ run_checkpoint_d_diagnostic() {
 
   [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] || abort "alembic heads != ${EXPECTED_AFTER} (got ${ALEMBIC_HEADS})"
 
-  echo "CHECKPOINT_D_DIAGNOSTIC=PASS"
-  echo "SYSTEM_PYTHON_ALEMBIC_USED=NO"
-  echo "STDERR_SWALLOWED=NO"
+  # Diagnostic PASS only for clean pre-010 upgrade readiness.
+  # Old 008/009 flags (INCONSISTENT_008 / PARTIAL_009 / ALLOW_009_UPGRADE) do NOT decide this.
+  if [[ "${SCHEMA_STATE_010}" == "A_CLEAN_PRE_010" && "${CLEAN_PRE_010}" == "YES" && "${ALLOW_010_UPGRADE}" == "YES" ]]; then
+    echo "CHECKPOINT_D_DIAGNOSTIC=PASS"
+    echo "SYSTEM_PYTHON_ALEMBIC_USED=NO"
+    echo "STDERR_SWALLOWED=NO"
+  else
+    echo "CHECKPOINT_D_DIAGNOSTIC=FAIL"
+    echo "CHECKPOINT_D_FAIL_REASON=SCHEMA_STATE_010=${SCHEMA_STATE_010} CLEAN_PRE_010=${CLEAN_PRE_010} ALLOW_010_UPGRADE=${ALLOW_010_UPGRADE}"
+    abort "010 diagnostic gate failed — refuse upgrade (fail closed)"
+  fi
 }
 
 report_migration_failure() {
@@ -562,48 +652,53 @@ docker exec "${PG_CONTAINER}" pg_restore -l "${CONTAINER_TMP}" >/tmp/gq-p5-resto
 echo "BACKUP_FILE=${BACKUP_FILE}"
 echo "BACKUP_VERIFIED=YES"
 echo "BACKUP_BEFORE_MIGRATION=YES"
-echo "MIGRATION_ALLOWED_ONLY_AFTER_BACKUP=YES"
-
 # Always run read-only D diagnostic before any upgrade (uses .venv; never swallows stderr).
 run_checkpoint_d_diagnostic
 
-# 010 requires intact 009 baseline (rules 51/24/27). Never re-seed CSCA.
-# Do not use CLEAN_PRE_009 / CSCA_RULE_COUNT_BEFORE==0 (those are 008→009 gates).
+# Re-evaluate independent 010 gate immediately before migrate (sole apply authority).
+# Old 008/009 flags must NOT decide upgrade.
 CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
 CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
 NON_CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type NOT IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
 TOTAL_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules;" | tr -d '[:space:]')"
-echo "CSCA_RULE_COUNT_BEFORE=${CSCA_RULE_COUNT_BEFORE}"
-echo "NON_CSCA_RULE_COUNT_BEFORE=${NON_CSCA_RULE_COUNT_BEFORE}"
-echo "TOTAL_RULE_COUNT_BEFORE=${TOTAL_RULE_COUNT_BEFORE}"
-[[ "${CSCA_RULE_COUNT_BEFORE}" == "${EXPECTED_CSCA_RULES}" ]] || abort "refuse continue: CSCA rules != ${EXPECTED_CSCA_RULES} on 009 baseline"
-[[ "${NON_CSCA_RULE_COUNT_BEFORE}" == "${EXPECTED_NON_CSCA_RULES}" ]] || abort "refuse continue: non-CSCA rules != ${EXPECTED_NON_CSCA_RULES}"
-[[ "${TOTAL_RULE_COUNT_BEFORE}" == "${EXPECTED_PRE_NOTIFICATION_RULES}" ]] || abort "refuse continue: total rules != ${EXPECTED_PRE_NOTIFICATION_RULES}"
+HAS_NOTIFICATIONS="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notifications') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_RULES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_rules') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_DEVICES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_devices') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_PREFERENCES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_preferences') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+DIRECT_DB_REVISION="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
+echo "=== 010 PRE-MIGRATE GATE ==="
+evaluate_010_release_gate \
+  "${DIRECT_DB_REVISION}" \
+  "${HAS_NOTIFICATIONS}" \
+  "${HAS_NOTIFICATION_RULES}" \
+  "${HAS_NOTIFICATION_DEVICES}" \
+  "${HAS_NOTIFICATION_PREFERENCES}" \
+  "${TOTAL_RULE_COUNT_BEFORE}" \
+  "${CSCA_RULE_COUNT_BEFORE}" \
+  "${NON_CSCA_RULE_COUNT_BEFORE}"
 echo "BASE_009_NOTIFICATION_READY=YES"
 echo "OLD_009_APPLY_GATES_NOT_USED_FOR_010=YES"
 
-if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
+if [[ "${SKIP_MIGRATE}" == "YES" || "${SKIP_010_MIGRATE}" == "YES" || "${SCHEMA_STATE_010}" == "B_ALREADY_010" ]]; then
+  echo "MIGRATION=SKIPPED_ALREADY_010"
+  SKIP_MIGRATE=YES
+elif [[ "${ALLOW_010_UPGRADE}" == "YES" && "${SCHEMA_STATE_010}" == "A_CLEAN_PRE_010" ]]; then
   section "CHECKPOINT D — APPLY 010"
   echo "ALEMBIC_CWD=${BACKEND}"
   echo "ALEMBIC_PYTHON=${VENV_PY}"
   echo "ALEMBIC_DATABASE_TARGET_PRE=$(echo "${DATABASE_URL}" | sed -E 's#^[^@]+@##; s#\?.*##')"
   echo "USING_SYSTEM_PYTHON3_M_ALEMBIC=NO"
-  echo "OLD_009_APPLY_GATES_BYPASSED=YES"
-  echo "REQUIRE_COMPLETE_009_BASELINE=YES"
+  echo "REQUIRE_ALLOW_010_UPGRADE=YES"
+  echo "OLD_008_009_APPLY_GATES_BYPASSED=YES"
 
-  # 010 gates — require complete 009 baseline; NEVER require CLEAN_PRE_009 / CSCA==0
-  [[ "${CSCA_RULE_COUNT_BEFORE}" == "${EXPECTED_CSCA_RULES}" ]] \
-    || abort "refuse upgrade: CSCA_RULE_COUNT_BEFORE=${CSCA_RULE_COUNT_BEFORE} != ${EXPECTED_CSCA_RULES}"
-  [[ "${NON_CSCA_RULE_COUNT_BEFORE}" == "${EXPECTED_NON_CSCA_RULES}" ]] \
-    || abort "refuse upgrade: NON_CSCA_RULE_COUNT_BEFORE=${NON_CSCA_RULE_COUNT_BEFORE} != ${EXPECTED_NON_CSCA_RULES}"
-  [[ "${TOTAL_RULE_COUNT_BEFORE}" == "${EXPECTED_PRE_NOTIFICATION_RULES}" ]] \
-    || abort "refuse upgrade: TOTAL_RULE_COUNT_BEFORE=${TOTAL_RULE_COUNT_BEFORE} != ${EXPECTED_PRE_NOTIFICATION_RULES}"
   [[ "${ALEMBIC_CURRENT}" == "${EXPECTED_BEFORE}" ]] \
     || abort "refuse upgrade: ALEMBIC_CURRENT=${ALEMBIC_CURRENT} != ${EXPECTED_BEFORE}"
   [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]] \
     || abort "refuse upgrade: DIRECT_DB_REVISION=${DIRECT_DB_REVISION} != ${EXPECTED_BEFORE}"
   [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] \
     || abort "refuse upgrade: ALEMBIC_HEADS=${ALEMBIC_HEADS} != ${EXPECTED_AFTER}"
+  [[ "${ALLOW_010_UPGRADE}" == "YES" ]] \
+    || abort "refuse upgrade: ALLOW_010_UPGRADE!=YES (SCHEMA_STATE_010=${SCHEMA_STATE_010})"
 
   MIGRATION_STARTED=YES
   echo "MIGRATION_STARTED=YES"
@@ -611,7 +706,6 @@ if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   alembic_bound upgrade "${EXPECTED_AFTER}" >/tmp/gq-p5-alembic-upgrade.out 2>/tmp/gq-p5-alembic-upgrade.err
   up_rc=$?
   set -e
-  # Always show bound target line from stdout if present
   grep -E '^ALEMBIC_BOUND_TARGET=' /tmp/gq-p5-alembic-upgrade.out 2>/dev/null || true
   if [[ "${up_rc}" -ne 0 ]]; then
     report_migration_failure "${up_rc}" /tmp/gq-p5-alembic-upgrade.err
@@ -628,7 +722,7 @@ if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   echo "ROLLBACK_REQUIRED=NO"
   echo "MIGRATION=PASS"
 else
-  echo "MIGRATION=SKIPPED_ALREADY_010"
+  abort "refuse upgrade: SCHEMA_STATE_010=${SCHEMA_STATE_010} ALLOW_010_UPGRADE=${ALLOW_010_UPGRADE} (fail closed)"
 fi
 
 section "CHECKPOINT E — SCHEMA VERIFY"
@@ -713,14 +807,30 @@ echo "NON_CSCA_RULE_COUNT_AFTER=${NON_CSCA_RULE_COUNT_AFTER}"
 [[ "${NON_CSCA_RULE_COUNT_AFTER}" == "${EXPECTED_NON_CSCA_RULES}" ]] || abort "NON_CSCA_RULE_COUNT_AFTER != ${EXPECTED_NON_CSCA_RULES}"
 
 
-# 010 CRM objects
-HAS_FOLLOW_UPS="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='student_follow_ups') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
-HAS_ASSIGNEE="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='student_master_profiles' AND column_name='assignee_user_id') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
-HAS_CRM_STAGE="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='student_master_profiles' AND column_name='crm_stage') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
-echo "010_HAS_student_follow_ups=${HAS_FOLLOW_UPS}"
-echo "010_HAS_assignee_user_id=${HAS_ASSIGNEE}"
-echo "010_HAS_crm_stage=${HAS_CRM_STAGE}"
-[[ "${HAS_FOLLOW_UPS}" == "YES" && "${HAS_ASSIGNEE}" == "YES" && "${HAS_CRM_STAGE}" == "YES" ]] || abort "010 CRM schema objects missing"
+# Post-migrate 010 gate — must be B_ALREADY_010
+echo "=== 010 POST-MIGRATE GATE ==="
+CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
+CSCA_RULE_COUNT_AFTER="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
+NON_CSCA_RULE_COUNT_AFTER="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type NOT IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
+TOTAL_RULE_COUNT_AFTER="$(pg_sql "SELECT count(*) FROM notification_rules;" | tr -d '[:space:]')"
+HAS_NOTIFICATIONS="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notifications') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_RULES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_rules') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_DEVICES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_devices') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+HAS_NOTIFICATION_PREFERENCES="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notification_preferences') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+DIRECT_DB_REVISION="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
+evaluate_010_release_gate \
+  "${DIRECT_DB_REVISION}" \
+  "${HAS_NOTIFICATIONS}" \
+  "${HAS_NOTIFICATION_RULES}" \
+  "${HAS_NOTIFICATION_DEVICES}" \
+  "${HAS_NOTIFICATION_PREFERENCES}" \
+  "${TOTAL_RULE_COUNT_AFTER}" \
+  "${CSCA_RULE_COUNT_AFTER}" \
+  "${NON_CSCA_RULE_COUNT_AFTER}"
+[[ "${SCHEMA_STATE_010}" == "B_ALREADY_010" && "${ALREADY_UPGRADED_010}" == "YES" ]] \
+  || abort "post-migrate 010 gate failed: SCHEMA_STATE_010=${SCHEMA_STATE_010}"
+[[ "${DIRECT_DB_REVISION}" == "${EXPECTED_AFTER}" ]] \
+  || abort "DB_REVISION_AFTER != ${EXPECTED_AFTER} (got ${DIRECT_DB_REVISION})"
 echo "NAME_BACKFILL_APPLIED=NO"
 
 section "CHECKPOINT F — DATA INTEGRITY"
