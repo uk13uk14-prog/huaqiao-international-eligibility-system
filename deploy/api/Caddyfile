@@ -1,0 +1,11 @@
+# Production H5 API reverse proxy (loopback only).
+# Upstream: SaaS Pro on 127.0.0.1:8010
+# Free :8000 is NOT required for production H5 (VITE_API_BASE / VITE_SAAS_API → api.guoqiaoplan.com).
+
+{
+	auto_https off
+}
+
+:8088 {
+	reverse_proxy 127.0.0.1:8010
+}

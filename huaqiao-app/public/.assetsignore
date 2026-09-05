@@ -1,0 +1,3 @@
+# Files under the assets directory that must not be uploaded as public assets.
+_redirects
+.assetsignore

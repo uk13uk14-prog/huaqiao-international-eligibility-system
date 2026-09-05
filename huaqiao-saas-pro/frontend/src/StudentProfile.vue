@@ -28,16 +28,17 @@
 
     <div class="smp-student-bar">
       <el-select
-        :model-value="activeStudentId"
+        :model-value="currentStudentId"
         placeholder="选择学生"
         filterable
         style="min-width:240px"
+        data-testid="profile-student-switcher"
         @change="onSelectStudent"
       >
         <el-option
           v-for="s in students"
           :key="s.id"
-          :label="`${s.display_name}（完整度 ${s.completeness?.percent || 0}%）`"
+          :label="`${s.display_name}（完整度 ${s.completeness?.percent || 0}%）${normalizeStudentId(s.id) === currentStudentId ? ' · 当前' : ''}`"
           :value="normalizeStudentId(s.id)"
         />
       </el-select>
@@ -448,7 +449,7 @@ import {
   activeStudentId,
   loadForActiveStudent,
   normalizeStudentId,
-  setActiveStudentId,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import { CURRICULUMS, GRADE_TYPES, LANGUAGE_EXAMS, OTHER_EXAM_TYPES, PRIORITY_LEVELS, SCHOOL_TYPES, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
@@ -500,6 +501,7 @@ const manualForm = ref({ title: '', deadline: '', university_name: '', student_n
 const wizardMode = computed(() => profile.value && !profile.value.wizard_completed)
 const wizardIndex = computed(() => Math.max(0, wizardSections.findIndex(s => s.key === section.value)))
 const saveLabel = computed(() => wizardMode.value ? '保存并继续' : '保存修改')
+const currentStudentId = computed(() => normalizeStudentId(activeStudentId.value))
 const readinessScore = computed(() => portrait.value?.application_readiness?.score ?? dashboard.value?.application_readiness?.score ?? 0)
 const targetCounts = computed(() => portrait.value?.targets?.counts || dashboard.value?.targets || { reach: 0, target: 0, match: 0, safety: 0 })
 const canCreate = computed(() => !!slots.value.can_create_student)
@@ -539,7 +541,8 @@ function goSection(key) {
 
 async function loadList() {
   const r = await api.students()
-  students.value = r.students || []
+  // Always keep the full account student list — never reduce to the active one
+  students.value = Array.isArray(r.students) ? r.students.slice() : []
   if (r.slots) slots.value = r.slots
   const resolved = syncStudentsAndActive(students.value)
   if (resolved && loadedStudentId.value !== resolved) {
@@ -553,7 +556,7 @@ async function createStudent() {
   }
   try {
     const r = await api.createStudent({ wizard: true, profile: {} })
-    setActiveStudentId(r.id, { allowUnknown: true })
+    switchActiveStudent(r.id, { allowUnknown: true })
     applyPayload(r)
     if (r.slots) slots.value = r.slots
     section.value = 'basic_info'
@@ -564,18 +567,31 @@ async function createStudent() {
   }
 }
 function onSelectStudent(id) {
-  openStudent(id)
+  const nid = normalizeStudentId(id)
+  if (nid == null || nid === currentStudentId.value) return
+  openStudent(nid)
 }
 async function openStudent(id) {
   const nid = normalizeStudentId(id)
   if (!nid) return
-  setActiveStudentId(nid, { allowUnknown: true })
+  const listCount = students.value.length
+  switchActiveStudent(nid, { allowUnknown: true })
+  // Switching must not erase sibling profiles from the local list
+  if (listCount > 0 && students.value.length !== listCount) {
+    students.value = students.value.slice(0, listCount)
+  }
   const result = await loadForActiveStudent(nid, (sid) => api.student(sid))
   if (!result.ok) {
     if (result.reason === 'error') ElMessage.error(result.error?.message || '加载学生失败')
     return
   }
   applyPayload(result.data)
+  // Refresh section-bound derived data so top label and body stay in sync
+  if (section.value === 'portrait') await refreshPortrait()
+  if (section.value === 'my_timeline') await loadMyTimeline()
+  if (section.value === 'summary') {
+    // summary uses applyPayload portrait/dashboard already
+  }
 }
 function applyPayload(r) {
   loadedStudentId.value = normalizeStudentId(r.id)

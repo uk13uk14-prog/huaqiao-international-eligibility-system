@@ -69,6 +69,7 @@ SECTION_NOTES = {
     "identity": "identity_notes",
     "planning": "planning_notes",
     "summary": "summary_notes",
+    "csca": "csca_notes",
 }
 
 SECTIONS = list(SECTION_NOTES.keys())
@@ -209,6 +210,12 @@ def empty_eligibility_card() -> dict[str, Any]:
     }
 
 
+
+def _empty_csca_section() -> dict[str, Any]:
+    from .csca import empty_csca
+    return empty_csca()
+
+
 def empty_profile() -> dict[str, Any]:
     current = empty_school(is_current=True)
     return {
@@ -274,6 +281,7 @@ def empty_profile() -> dict[str, Any]:
         "summary": {
             "summary_notes": "",
         },
+        "csca": _empty_csca_section(),
         "legacy": {},
     }
 
@@ -498,6 +506,9 @@ def normalize_profile(raw: dict | None) -> dict[str, Any]:
                 targets.append(row)
             merged["targets"] = targets
             merged["goals_notes"] = incoming.get("goals_notes", merged["goals_notes"])
+        elif section == "csca":
+            from .csca import normalize_csca
+            merged = normalize_csca({**merged, **incoming})
         elif section == "identity":
             for key in list(merged.keys()):
                 if key in ("international", "huaqiao"):
@@ -702,6 +713,8 @@ def profile_summary(profile: dict) -> dict[str, Any]:
         "target_universities": [t.get("university_name") for t in targets if t.get("university_name")],
         "priority_counts": counts,
         "completeness": completeness(p),
+        "csca_status": (p.get("csca") or {}).get("csca_status") or "NOT_PLANNED",
+        "csca_score": (p.get("csca") or {}).get("csca_score") or "",
     }
 
 

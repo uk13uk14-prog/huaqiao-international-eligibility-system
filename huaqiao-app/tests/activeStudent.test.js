@@ -172,3 +172,87 @@ test('foreign student_id cannot be selected when list is known', () => {
   assert.equal(store.setActiveStudentId(999), false)
   assert.equal(store.activeStudentId.value, 1)
 })
+
+test('TEST_1–5: bidirectional switch preserves full student list and active id', () => {
+  store.clearActiveStudent()
+  const list = [
+    { id: 1, display_name: '兰恩' },
+    { id: 2, display_name: 'Student B' },
+  ]
+  store.syncStudentsAndActive(list, 1)
+  assert.equal(store.activeStudentId.value, 1)
+  assert.equal(store.accessibleStudents.value.length, 2)
+
+  // TEST_1 A→B
+  assert.equal(store.switchActiveStudent(2), true)
+  assert.equal(store.activeStudentId.value, 2)
+  assert.equal(store.accessibleStudents.value.length, 2)
+
+  // TEST_2 after B, A still in list / switchable
+  const switchableOnB = store.switchableStudents.value.map((s) => s.id)
+  assert.deepEqual(switchableOnB, [1])
+  assert.ok(store.accessibleStudents.value.some((s) => s.id === 1))
+
+  // TEST_3 B→A
+  assert.equal(store.switchActiveStudent(1), true)
+  assert.equal(store.activeStudentId.value, 1)
+
+  // TEST_4 A→B→A
+  assert.equal(store.switchActiveStudent(2), true)
+  assert.equal(store.switchActiveStudent(1), true)
+  assert.equal(store.activeStudentId.value, 1)
+  assert.equal(store.studentLabel(store.accessibleStudents.value, 1), '兰恩')
+
+  // TEST_5 count always 2
+  assert.equal(store.accessibleStudents.value.length, 2)
+})
+
+test('TEST_6: refresh restores persisted activeStudentId', () => {
+  const storage = memoryStorage({ smp_active_student_id: '2' })
+  const list = [
+    { id: 1, display_name: '兰恩' },
+    { id: 2, display_name: 'Student B' },
+  ]
+  const preferred = store.readPersistedStudentId(storage)
+  assert.equal(preferred, 2)
+  store.clearActiveStudent()
+  const resolved = store.syncStudentsAndActive(list, preferred)
+  assert.equal(resolved, 2)
+  assert.equal(store.activeStudentId.value, 2)
+})
+
+test('TEST_7: switch reloads context by student_id (eligibility/timeline keyed by id)', async () => {
+  store.clearActiveStudent()
+  store.syncStudentsAndActive([
+    { id: 1, display_name: '兰恩' },
+    { id: 2, display_name: 'Student B' },
+  ], 1)
+  const payloads = {
+    1: { id: 1, eligibility: { international: 'A-elig' }, timeline: [{ title: 'A-tl' }], profile: { basic_info: { chinese_name: '兰恩' } } },
+    2: { id: 2, eligibility: { international: 'B-elig' }, timeline: [{ title: 'B-tl' }], profile: { basic_info: { chinese_name: 'Student B' } } },
+  }
+  const rB = await store.loadForActiveStudent(2, async (id) => payloads[id])
+  assert.equal(rB.ok, true)
+  assert.equal(rB.studentId, 2)
+  assert.equal(rB.data.eligibility.international, 'B-elig')
+  assert.equal(rB.data.timeline[0].title, 'B-tl')
+
+  const rA = await store.loadForActiveStudent(1, async (id) => payloads[id])
+  assert.equal(rA.ok, true)
+  assert.equal(rA.studentId, 1)
+  assert.equal(rA.data.eligibility.international, 'A-elig')
+  assert.equal(rA.data.profile.basic_info.chinese_name, '兰恩')
+})
+
+test('switch never replaces accessibleStudents with only the selected student', () => {
+  store.clearActiveStudent()
+  store.syncStudentsAndActive([
+    { id: 1, display_name: '兰恩' },
+    { id: 2, display_name: 'Student B' },
+  ], 1)
+  store.switchActiveStudent(2)
+  store.switchActiveStudent(1)
+  store.switchActiveStudent(2)
+  assert.equal(store.accessibleStudents.value.length, 2)
+  assert.deepEqual(store.accessibleStudents.value.map((s) => s.id).sort(), [1, 2])
+})

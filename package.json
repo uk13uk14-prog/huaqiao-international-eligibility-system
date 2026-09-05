@@ -1,0 +1,14 @@
+{
+  "name": "guoqiao-h5-cloudflare-root",
+  "private": true,
+  "description": "Root package for Cloudflare Workers Builds of huaqiao-app H5 preview",
+  "scripts": {
+    "build:h5": "node scripts/cf-build-h5.mjs",
+    "deploy:h5": "npm run build:h5 && npx wrangler deploy",
+    "upload:h5": "npm run build:h5 && npx wrangler versions upload",
+    "build:h5:ci": "npm ci --prefix huaqiao-app && npm run build --prefix huaqiao-app"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
+  }
+}

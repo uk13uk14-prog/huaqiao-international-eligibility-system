@@ -11,11 +11,16 @@ from app.database import Base
 from app.models import *  # noqa: F401, F403
 
 config = context.config
-if config.get_main_option("sqlalchemy.url", "").startswith("postgresql"):
-    pass
-else:
-    database_url = os.getenv("DATABASE_URL", "postgresql+psycopg://huaqiao:huaqiao_dev@localhost:5432/huaqiao_free")
-    config.set_main_option("sqlalchemy.url", database_url)
+# Prefer explicit DATABASE_URL so CI can override alembic.ini credentials.
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    # ConfigParser treats '%' as interpolation — URL-encoded passwords must use '%%'.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+elif not config.get_main_option("sqlalchemy.url", "").startswith("postgresql"):
+    config.set_main_option(
+        "sqlalchemy.url",
+        "postgresql+psycopg://huaqiao:huaqiao_dev@localhost:5432/huaqiao_free",
+    )
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
