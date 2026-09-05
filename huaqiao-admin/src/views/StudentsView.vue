@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="page-title">学生 CRM</h1>
-    <p class="page-sub gq-muted">点击姓名或整行进入 Student 360 · 不展示证件明文 / cipher</p>
+    <p class="page-sub gq-muted">点击姓名或整行进入 Student 360 · 不展示证件明文 / cipher / raw JSON</p>
 
     <div class="filters">
       <el-input v-model="q" placeholder="搜索姓名 / 所属邮箱 / Student ID" clearable style="max-width:280px" @keyup.enter="load" />
@@ -13,7 +13,7 @@
         <el-option v-for="(label, key) in stageLabels" :key="key" :label="label" :value="key" />
       </el-select>
       <el-select v-model="riskLevel" clearable placeholder="风险" style="width:120px" @change="load">
-        <el-option v-for="r in riskLevels" :key="r" :label="r" :value="r" />
+        <el-option v-for="r in riskOptions" :key="r.value" :label="r.label" :value="r.value" />
       </el-select>
       <el-select v-model="plan" clearable placeholder="Trial/Paid" style="width:120px" @change="load">
         <el-option label="Trial" value="trial" />
@@ -28,48 +28,42 @@
       <el-button type="primary" @click="load">搜索</el-button>
     </div>
 
-    <el-table :data="students" @row-click="go" style="cursor:pointer" empty-text="暂无学生">
+    <el-table :data="students" @row-click="go" style="cursor:pointer" empty-text="暂无记录">
       <el-table-column label="学生姓名" min-width="140">
         <template #default="{ row }">
-          <a class="name-link" @click.stop="go(row)">{{ row.display_name || '待补姓名' }}</a>
-          <el-tag v-if="row.display_name_needs_repair" size="small" type="warning" style="margin-left:6px">待补姓名</el-tag>
+          <a class="name-link" @click.stop="go(row)">{{ displayName(row) }}</a>
+          <el-tag v-if="needsName(row)" size="small" type="warning" style="margin-left:6px">待补姓名</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="所属账号" min-width="160">
-        <template #default="{ row }">{{ row.owner?.email || row.user_id }}</template>
-      </el-table-column>
-      <el-table-column label="身份路线" width="110">
+      <el-table-column label="身份路线" width="120">
         <template #default="{ row }">{{ identityLabel(row) }}</template>
       </el-table-column>
-      <el-table-column label="目标大学" min-width="140">
-        <template #default="{ row }">{{ (row.target_universities || []).join('、') || row.goal_hint || '—' }}</template>
+      <el-table-column label="目标入学年份" width="110">
+        <template #default="{ row }">{{ human(row.intended_entry_year, EMPTY.unset) }}</template>
       </el-table-column>
-      <el-table-column label="入学年份" width="90">
-        <template #default="{ row }">{{ row.intended_entry_year || '—' }}</template>
-      </el-table-column>
-      <el-table-column label="当前阶段" width="110">
-        <template #default="{ row }">{{ row.crm_stage_label || row.crm_stage || '—' }}</template>
+      <el-table-column label="CRM 阶段" width="110">
+        <template #default="{ row }">{{ human(row.crm_stage_label || row.crm_stage, EMPTY.unassigned) }}</template>
       </el-table-column>
       <el-table-column label="负责人" width="120">
-        <template #default="{ row }">{{ row.assignee_label || '未分配' }}</template>
+        <template #default="{ row }">{{ human(row.assignee_label, EMPTY.unassigned) }}</template>
       </el-table-column>
-      <el-table-column label="风险" width="90">
+      <el-table-column label="风险等级" width="100">
         <template #default="{ row }">
-          <el-tag size="small" :type="riskType(row.risk_level)">{{ row.risk_level || 'NONE' }}</el-tag>
+          <el-tag size="small" :type="riskTagType(row.risk_level)">{{ riskLabel(row.risk_level) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最近跟进" width="160">
-        <template #default="{ row }">{{ row.last_follow_up_at || '—' }}</template>
-      </el-table-column>
       <el-table-column label="下一步" min-width="160">
-        <template #default="{ row }">{{ row.next_action || '—' }}</template>
+        <template #default="{ row }">{{ human(row.next_action, EMPTY.unset) }}</template>
       </el-table-column>
-      <el-table-column label="最后更新" width="160">
-        <template #default="{ row }">{{ row.updated_at || '—' }}</template>
+      <el-table-column label="下次跟进时间" width="160">
+        <template #default="{ row }">{{ humanDateTime(row.next_follow_up_at, EMPTY.unset) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="最近更新时间" width="160">
+        <template #default="{ row }">{{ humanDateTime(row.updated_at, EMPTY.none) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="110" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click.stop="go(row)">查看画像</el-button>
+          <el-button link type="primary" @click.stop="go(row)">进入360</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -80,6 +74,13 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
+import {
+  EMPTY,
+  human,
+  humanDateTime,
+  riskLabel,
+  riskTagType,
+} from '../utils/opsDisplay'
 
 const router = useRouter()
 const students = ref([])
@@ -91,21 +92,32 @@ const crmStage = ref()
 const riskLevel = ref()
 const plan = ref()
 const sort = ref('updated_at')
-const riskLevels = ['NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+const riskOptions = [
+  { value: 'NONE', label: '无' },
+  { value: 'LOW', label: '低' },
+  { value: 'MEDIUM', label: '中' },
+  { value: 'HIGH', label: '高' },
+  { value: 'CRITICAL', label: '严重' },
+]
 
+function displayName(row) {
+  const n = row.display_name
+  if (!n || n === '未命名学生' || n === '待补姓名') return '待补姓名'
+  // Never fall back to email as the student name
+  if (String(n).includes('@')) return '待补姓名'
+  return n
+}
+function needsName(row) {
+  return displayName(row) === '待补姓名' || row.display_name_needs_repair
+}
 function identityLabel(row) {
-  const track = row.identity_track
-  if (track) return track
+  const track = row.identity_track || row.identity_route
+  if (track) return human(track)
   const intl = row.summary?.international_status
   const hq = row.summary?.huaqiao_status
   if (intl && intl !== 'NOT_ASSESSED') return `国际生:${intl}`
   if (hq && hq !== 'NOT_ASSESSED') return `华侨生:${hq}`
-  return '—'
-}
-function riskType(r) {
-  if (r === 'CRITICAL' || r === 'HIGH') return 'danger'
-  if (r === 'MEDIUM') return 'warning'
-  return 'info'
+  return EMPTY.pending
 }
 function go(row) { router.push(`/students/${row.id}`) }
 async function load() {
@@ -118,7 +130,7 @@ async function load() {
     sort: sort.value,
   })
   students.value = data.students || []
-  stageLabels.value = data.stage_labels || {}
+  stageLabels.value = data.stage_labels || data.crm_stages || {}
 }
 onMounted(async () => {
   try { staff.value = (await api.staff()).staff || [] } catch { staff.value = [] }
