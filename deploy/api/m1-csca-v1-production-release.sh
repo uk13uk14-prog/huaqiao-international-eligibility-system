@@ -322,9 +322,31 @@ run_checkpoint_d_diagnostic() {
   echo "SCHEMA_STATE=${SCHEMA_STATE}"
   echo "ALLOW_008_UPGRADE=${ALLOW_008_UPGRADE}"
   echo "MIGRATION_PARTIAL_OR_INCONSISTENT=${MIGRATION_PARTIAL_OR_INCONSISTENT}"
-  if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT}" == "YES" ]]; then
+  # 008 already-upgraded is the NORMAL base for 009 — do not treat as a block.
+  evaluate_base_008_schema_ready "${SCHEMA_STATE}" "${N008_OBJECT_PRESENT_COUNT}" "${DIRECT_DB_REVISION}" || true
+  if [[ "${SCHEMA_STATE}" == "C_ALREADY_008" ]]; then
+    echo "008_ALREADY_UPGRADED_IS_VALID_BASE_FOR_009=YES"
+  else
+    echo "008_ALREADY_UPGRADED_IS_VALID_BASE_FOR_009=NO"
+  fi
+  if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT}" == "YES" && "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]]; then
     echo "NOTE=008 schema/alembic_version inconsistency — do NOT guess; inspect 008 tables before upgrade"
   fi
+
+  # 009 rule inventory (read-only) — drives independent 009 state machine
+  CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
+  CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
+  NON_CSCA_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type NOT IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
+  TOTAL_RULE_COUNT_BEFORE="$(pg_sql "SELECT count(*) FROM notification_rules;" | tr -d '[:space:]')"
+  echo "CSCA_RULE_COUNT_BEFORE=${CSCA_RULE_COUNT_BEFORE}"
+  echo "NON_CSCA_RULE_COUNT_BEFORE=${NON_CSCA_RULE_COUNT_BEFORE}"
+  echo "TOTAL_RULE_COUNT_BEFORE=${TOTAL_RULE_COUNT_BEFORE}"
+  classify_009_release_state \
+    "${DIRECT_DB_REVISION}" \
+    "${CSCA_RULE_COUNT_BEFORE}" \
+    "${NON_CSCA_RULE_COUNT_BEFORE}" \
+    "${TOTAL_RULE_COUNT_BEFORE}"
+  echo "OLD_008_GATE_NOT_USED_FOR_009_APPLY=YES"
 
   # Alembic current/heads via bound .venv (stderr captured — never discarded)
   set +e
@@ -566,9 +588,25 @@ echo "MIGRATION_ALLOWED_ONLY_AFTER_BACKUP=YES"
 # Always run read-only D diagnostic before any upgrade (uses .venv; never swallows stderr).
 run_checkpoint_d_diagnostic
 
-# Fail-closed on 008 partial/inconsistent regardless of SKIP_MIGRATE
-if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" == "YES" ]]; then
-  abort "refuse continue: MIGRATION_PARTIAL_OR_INCONSISTENT=YES (008 schema guard) — inspect 008 objects first"
+# 008 partial/inconsistent only blocks when still on expected 008 base.
+# SCHEMA_STATE=C_ALREADY_008 is the normal prerequisite for 009 — never abort on ALLOW_008_UPGRADE.
+if [[ "${DIRECT_DB_REVISION:-${CUR_REV}}" == "${EXPECTED_BEFORE}" && "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" == "YES" ]]; then
+  abort "refuse continue: 008 schema partial/inconsistent while on ${EXPECTED_BEFORE} — inspect 008 objects first"
+fi
+if [[ "${PARTIAL_009:-NO}" == "YES" ]]; then
+  abort "refuse continue: PARTIAL_009=YES (CSCA rules partially present) — fail closed"
+fi
+if [[ "${INCONSISTENT_009:-NO}" == "YES" ]]; then
+  abort "refuse continue: INCONSISTENT_009=YES — fail closed"
+fi
+if [[ "${BASE_008_SCHEMA_READY:-NO}" != "YES" ]]; then
+  abort "refuse continue: BASE_008_SCHEMA_READY!=YES (need intact 008 notification schema)"
+fi
+
+# Align SKIP_MIGRATE with independent 009 state machine
+if [[ "${ALREADY_UPGRADED_009:-NO}" == "YES" || "${SKIP_009_MIGRATE:-NO}" == "YES" ]]; then
+  SKIP_MIGRATE=YES
+  echo "SKIP_MIGRATE=YES (ALREADY_UPGRADED_009)"
 fi
 
 if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
@@ -577,19 +615,31 @@ if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   echo "ALEMBIC_PYTHON=${VENV_PY}"
   echo "ALEMBIC_DATABASE_TARGET_PRE=$(echo "${DATABASE_URL}" | sed -E 's#^[^@]+@##; s#\?.*##')"
   echo "USING_SYSTEM_PYTHON3_M_ALEMBIC=NO"
+  echo "BASE_008_SCHEMA_READY=${BASE_008_SCHEMA_READY}"
+  echo "CLEAN_PRE_009=${CLEAN_PRE_009}"
+  echo "ALLOW_009_UPGRADE=${ALLOW_009_UPGRADE}"
+  echo "SCHEMA_STATE_009=${SCHEMA_STATE_009}"
+  echo "OLD_008_APPLY_GATE_BYPASSED=YES"
 
-  [[ "${ALLOW_008_UPGRADE:-NO}" == "YES" ]] \
-    || abort "refuse upgrade: ALLOW_008_UPGRADE!=YES (SCHEMA_STATE=${SCHEMA_STATE:-UNKNOWN})"
-  [[ "${CLEAN_PRE_008:-NO}" == "YES" ]] \
-    || abort "refuse upgrade: CLEAN_PRE_008!=YES"
+  # Independent 009 gates — NEVER require ALLOW_008_UPGRADE / CLEAN_PRE_008
+  [[ "${BASE_008_SCHEMA_READY}" == "YES" ]] \
+    || abort "refuse upgrade: BASE_008_SCHEMA_READY!=YES"
+  [[ "${ALLOW_009_UPGRADE}" == "YES" ]] \
+    || abort "refuse upgrade: ALLOW_009_UPGRADE!=YES (SCHEMA_STATE_009=${SCHEMA_STATE_009:-UNKNOWN})"
+  [[ "${CLEAN_PRE_009}" == "YES" ]] \
+    || abort "refuse upgrade: CLEAN_PRE_009!=YES"
+  [[ "${CSCA_RULE_COUNT_BEFORE}" == "0" ]] \
+    || abort "refuse upgrade: CSCA_RULE_COUNT_BEFORE=${CSCA_RULE_COUNT_BEFORE} != 0"
+  [[ "${NON_CSCA_RULE_COUNT_BEFORE}" == "${EXPECTED_NON_CSCA_RULES}" ]] \
+    || abort "refuse upgrade: NON_CSCA_RULE_COUNT_BEFORE=${NON_CSCA_RULE_COUNT_BEFORE} != ${EXPECTED_NON_CSCA_RULES}"
+  [[ "${TOTAL_RULE_COUNT_BEFORE}" == "${EXPECTED_PRE_NOTIFICATION_RULES}" ]] \
+    || abort "refuse upgrade: TOTAL_RULE_COUNT_BEFORE=${TOTAL_RULE_COUNT_BEFORE} != ${EXPECTED_PRE_NOTIFICATION_RULES}"
   [[ "${ALEMBIC_CURRENT}" == "${EXPECTED_BEFORE}" ]] \
     || abort "refuse upgrade: ALEMBIC_CURRENT=${ALEMBIC_CURRENT} != ${EXPECTED_BEFORE}"
   [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]] \
     || abort "refuse upgrade: DIRECT_DB_REVISION=${DIRECT_DB_REVISION} != ${EXPECTED_BEFORE}"
   [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] \
     || abort "refuse upgrade: ALEMBIC_HEADS=${ALEMBIC_HEADS} != ${EXPECTED_AFTER}"
-  [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" != "YES" ]] \
-    || abort "refuse upgrade: MIGRATION_PARTIAL_OR_INCONSISTENT=YES (008 schema guard) — inspect 008 objects first"
 
   MIGRATION_STARTED=YES
   echo "MIGRATION_STARTED=YES"

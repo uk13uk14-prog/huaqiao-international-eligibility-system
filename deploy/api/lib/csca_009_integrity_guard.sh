@@ -9,6 +9,10 @@
 #
 # Universities / timelines remain fixed fingerprints (125 / 900).
 # Notification rules: 008 baseline 27 + 009 CSCA seeds 24 => 51; non-CSCA must stay 27.
+#
+# 009 release state machine is INDEPENDENT of 008 upgrade gates.
+# SCHEMA_STATE=C_ALREADY_008 is a VALID base for 009 (BASE_008_SCHEMA_READY=YES).
+# Never require ALLOW_008_UPGRADE / CLEAN_PRE_008 to apply 009.
 
 # Exact event_type values from alembic/versions/009_csca_notification_rules.py
 CSCA_009_EVENT_TYPES=(
@@ -154,5 +158,103 @@ validate_post_integrity() {
   echo "POST_NOTIFICATION_RULE_COUNT=${post_rules}"
   echo "CSCA_RULE_COUNT=${csca_rules}"
   echo "NON_CSCA_RULE_COUNT_AFTER=${non_csca_rules}"
+  return 0
+}
+
+# evaluate_base_008_schema_ready <schema_state_008> <object_present_count> [revision]
+# For 009 release: C_ALREADY_008 + 4/4 tables => BASE_008_SCHEMA_READY=YES.
+# When revision is already 009, 4/4 tables alone is sufficient base readiness.
+evaluate_base_008_schema_ready() {
+  local schema_state="${1:-}"
+  local present_count="${2:-0}"
+  local rev="${3:-}"
+  local expected_after="${EXPECTED_AFTER:-009_csca_notification_rules}"
+  BASE_008_SCHEMA_READY=NO
+  if [[ "${present_count}" == "4" ]]; then
+    if [[ "${schema_state}" == "C_ALREADY_008" ]]; then
+      BASE_008_SCHEMA_READY=YES
+    elif [[ "${rev}" == "${expected_after}" ]]; then
+      BASE_008_SCHEMA_READY=YES
+    fi
+  fi
+  echo "BASE_008_SCHEMA_READY=${BASE_008_SCHEMA_READY}"
+  [[ "${BASE_008_SCHEMA_READY}" == "YES" ]]
+}
+
+
+# classify_009_release_state <revision> <csca_count> <non_csca_count> <total_count>
+# Independent of ALLOW_008_UPGRADE / CLEAN_PRE_008.
+# Sets:
+#   CLEAN_PRE_009 PARTIAL_009 ALREADY_UPGRADED_009 INCONSISTENT_009
+#   ALLOW_009_UPGRADE SKIP_009_MIGRATE SCHEMA_STATE_009
+classify_009_release_state() {
+  local rev="${1:-}"
+  local csca="${2:-}"
+  local non_csca="${3:-}"
+  local total="${4:-}"
+  local expected_before="${EXPECTED_BEFORE:-008_notification_center_v1}"
+  local expected_after="${EXPECTED_AFTER:-009_csca_notification_rules}"
+  local expected_pre_rules="${EXPECTED_PRE_NOTIFICATION_RULES:-27}"
+  local expected_csca="${EXPECTED_CSCA_RULES:-24}"
+  local expected_non_csca="${EXPECTED_NON_CSCA_RULES:-27}"
+  local expected_post_rules="${EXPECTED_POST_NOTIFICATION_RULES:-51}"
+
+  CLEAN_PRE_009=NO
+  PARTIAL_009=NO
+  ALREADY_UPGRADED_009=NO
+  INCONSISTENT_009=NO
+  ALLOW_009_UPGRADE=NO
+  SKIP_009_MIGRATE=NO
+  SCHEMA_STATE_009=UNKNOWN
+
+  if ! is_nonneg_int "${csca}" || ! is_nonneg_int "${non_csca}" || ! is_nonneg_int "${total}"; then
+    INCONSISTENT_009=YES
+    SCHEMA_STATE_009=D_INCONSISTENT_009
+    echo "SCHEMA_STATE_009=${SCHEMA_STATE_009}"
+    echo "INCONSISTENT_009=YES"
+    return 1
+  fi
+
+  if [[ "${rev}" == "${expected_before}" ]]; then
+    if [[ "${csca}" == "0" && "${non_csca}" == "${expected_non_csca}" && "${total}" == "${expected_pre_rules}" ]]; then
+      # A) clean pre-009 — normal apply path
+      CLEAN_PRE_009=YES
+      ALLOW_009_UPGRADE=YES
+      SCHEMA_STATE_009=A_CLEAN_PRE_009
+    elif [[ "${csca}" != "0" && "${csca}" != "${expected_csca}" ]]; then
+      # B) partial CSCA seed while still on 008
+      PARTIAL_009=YES
+      SCHEMA_STATE_009=B_PARTIAL_009
+    elif [[ "${csca}" == "${expected_csca}" && "${non_csca}" == "${expected_non_csca}" && "${total}" == "${expected_post_rules}" ]]; then
+      # Data looks fully seeded but revision still 008 — treat as partial/inconsistent stamp gap
+      PARTIAL_009=YES
+      SCHEMA_STATE_009=B_PARTIAL_009
+    else
+      INCONSISTENT_009=YES
+      SCHEMA_STATE_009=D_INCONSISTENT_009
+    fi
+  elif [[ "${rev}" == "${expected_after}" ]]; then
+    if [[ "${csca}" == "${expected_csca}" && "${non_csca}" == "${expected_non_csca}" && "${total}" == "${expected_post_rules}" ]]; then
+      # C) already upgraded — do not re-migrate
+      ALREADY_UPGRADED_009=YES
+      SKIP_009_MIGRATE=YES
+      SCHEMA_STATE_009=C_ALREADY_009
+    else
+      # D) stamped 009 but rule counts wrong
+      INCONSISTENT_009=YES
+      SCHEMA_STATE_009=D_INCONSISTENT_009
+    fi
+  else
+    INCONSISTENT_009=YES
+    SCHEMA_STATE_009=UNEXPECTED_REVISION
+  fi
+
+  echo "SCHEMA_STATE_009=${SCHEMA_STATE_009}"
+  echo "CLEAN_PRE_009=${CLEAN_PRE_009}"
+  echo "PARTIAL_009=${PARTIAL_009}"
+  echo "ALREADY_UPGRADED_009=${ALREADY_UPGRADED_009}"
+  echo "INCONSISTENT_009=${INCONSISTENT_009}"
+  echo "ALLOW_009_UPGRADE=${ALLOW_009_UPGRADE}"
+  echo "SKIP_009_MIGRATE=${SKIP_009_MIGRATE}"
   return 0
 }
