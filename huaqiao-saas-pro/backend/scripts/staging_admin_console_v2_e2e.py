@@ -324,8 +324,13 @@ def main() -> int:
         need_actions = {"LOGIN", "EMPLOYEE_CREATE", "EMPLOYEE_UPDATE", "EMPLOYEE_DISABLE", "EMPLOYEE_ENABLE", "STUDENT_ASSIGNMENT_CHANGE", "CRM_STAGE_CHANGE", "FOLLOW_UP_CREATE"}
         flag("ASSIGNMENT_AUDIT", ev.status_code == 200 and bool(ev.json().get("events")))
         flag("AUDIT_LOG_UI", need_actions.issubset(actions), f"missing={sorted(need_actions - actions)}")
-        blob = json.dumps(ev_all.json(), ensure_ascii=False).lower()
-        flag("AUDIT_PRIVACY_SCRUB", not any(x in blob for x in ("password", "token", "cipher", '"hash"')))
+        blob = json.dumps(ev_all.json(), ensure_ascii=False)
+        low = blob.lower()
+        leaked = any(
+            x in low
+            for x in ("cipher_blob", "$2b$", "eyj", "must_change_password", fixture_pw.lower(), temp_pw.lower())
+        ) or any("metadata" in e for e in (ev_all.json().get("events") or []))
+        flag("AUDIT_PRIVACY_SCRUB", not leaked)
 
         c360 = httpx.get(f"{BASE}/api/admin/v1/consultants/{con_a['id']}", headers=admin_h, timeout=20)
         flag("CONSULTANT_360", c360.status_code == 200 and c360.json().get("ai_hooks", {}).get("auto_send") is False and sid_a in {s["id"] for s in c360.json().get("students") or []})

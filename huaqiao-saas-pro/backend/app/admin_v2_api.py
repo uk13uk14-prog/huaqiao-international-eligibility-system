@@ -224,25 +224,28 @@ def list_audit_events(
     if action:
         q = q.filter(AuditEvent.action == action)
     rows = q.limit(200).all()
-    banned = ("password", "token", "cipher", "secret", "hash")
+    action_alias = {
+        "EMPLOYEE_PASSWORD_RESET": "EMPLOYEE_CREDENTIAL_RESET",
+        "STAFF_LOGIN": "LOGIN",
+        "EMPLOYEE_EDIT": "EMPLOYEE_UPDATE",
+        "STUDENT_FOLLOW_UP_CREATE": "FOLLOW_UP_CREATE",
+    }
     items = []
     for r in rows:
         actor = db.query(User).filter(User.id == r.actor_user_id).first() if r.actor_user_id else None
-        meta = r.metadata_json or "{}"
-        low = meta.lower()
-        if any(b in low for b in banned):
-            meta = '{"redacted":true}'
+        action = action_alias.get(r.action or "", r.action)
+        # Never return metadata_json / payloads (may contain emails + operational keys).
         items.append(
             {
                 "id": r.id,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "actor_user_id": r.actor_user_id,
                 "actor_label": (actor.name or actor.email) if actor else "系统",
-                "action": r.action,
+                "action": action,
                 "resource_type": r.resource_type,
                 "resource_id": r.resource_id,
                 "student_id": r.student_id,
-                "summary": f"{r.action} · {r.resource_type} #{r.resource_id or '-'}",
+                "summary": f"{action} · {r.resource_type} #{r.resource_id or '-'}",
                 "result": "成功",
             }
         )

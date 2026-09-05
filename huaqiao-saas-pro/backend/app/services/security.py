@@ -61,16 +61,17 @@ def create_token(db: Session, user: User) -> str:
         "jti": secrets.token_urlsafe(16),
     }
     try:
-        from .admin_rbac import capabilities_for, resolve_console_role
+        from .admin_rbac import resolve_console_role
         console = resolve_console_role(user)
         payload["console_role"] = console.value if console else None
-        payload["permissions"] = capabilities_for(user)
     except Exception:
         payload["console_role"] = None
-        payload["permissions"] = []
+    # Do not embed the capability catalog — it overflows auth_tokens.token (varchar 512).
+    # Frontend reads permissions from /api/admin/v1/me; backend re-computes RBAC per request.
     token = jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
-    # Store in AuthToken table for revocation support
-    db.add(AuthToken(user_id=user.id, token=token))
+    # auth_tokens.token is varchar(512). Persist a hash when the JWT is longer.
+    stored = token if len(token) <= 500 else hashlib.sha256(token.encode("utf-8")).hexdigest()
+    db.add(AuthToken(user_id=user.id, token=stored))
     db.commit()
     return token
 
