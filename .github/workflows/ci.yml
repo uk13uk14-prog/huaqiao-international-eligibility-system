@@ -121,14 +121,14 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
-      - name: Check saas-pro migrations (through 008)
+      - name: Check saas-pro migrations (through 009)
         env:
           DATABASE_URL: postgresql+psycopg://huaqiao:test@localhost:5432/huaqiao_saas
         run: |
           cd huaqiao-saas-pro/backend
           pip install -r requirements-locked.txt "psycopg[binary]==3.2.3"
           alembic upgrade head
-          alembic current | grep -q 008_notification_center_v1
-          alembic downgrade 007_admin_ai_expert_v1
+          alembic current | grep -q 009_csca_notification_rules
+          alembic downgrade 008_notification_center_v1
           alembic upgrade head
-          alembic current | grep -q 008_notification_center_v1
+          alembic current | grep -q 009_csca_notification_rules

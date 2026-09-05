@@ -465,9 +465,6 @@ def _parse_optional_date(value: str | None):
         raise HTTPException(status_code=400, detail=f"日期格式无效: {value}") from exc
 
 
-@router.post("/{student_id}/timeline/manual")
-
-
 @router.get("/{student_id}/csca")
 def get_csca(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """CSCA exam center payload. Dates never invented."""
@@ -489,6 +486,7 @@ def get_csca(student_id: int, user: User = Depends(get_current_user), db: Sessio
     }
 
 
+@router.post("/{student_id}/timeline/manual")
 def create_manual_timeline(
     student_id: int,
     payload: StudentTimelineManualCreate,
