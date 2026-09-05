@@ -28,6 +28,11 @@ class User(Base):
     student_profile_limit_override = Column(Integer, nullable=True)  # account-level seat override
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Admin Console V2 staff profile — additive; customers stay CUSTOMER
+    account_kind = Column(String(20), default="CUSTOMER", index=True)  # CUSTOMER | STAFF
+    job_title = Column(String(80), default="")
+    last_login_at = Column(DateTime, nullable=True)
+    must_change_password = Column(Boolean, default=False)
     tenant = relationship("Tenant", back_populates="users")
 
 

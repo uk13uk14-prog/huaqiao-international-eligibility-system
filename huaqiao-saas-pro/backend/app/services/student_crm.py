@@ -41,7 +41,8 @@ CRM_STAGE_LABELS_ZH = {
 
 RISK_LEVELS = ("NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 FOLLOW_UP_SOURCES = ("HUMAN", "AI_ASSISTED", "SYSTEM")
-STAFF_ROLES = frozenset({"admin", "consultant", "support", "super_admin"})
+STAFF_ROLES = frozenset({"admin", "consultant", "support", "super_admin", "operations_admin"})
+ASSIGNABLE_ROLES = frozenset({"admin", "consultant", "super_admin", "operations_admin"})
 PLACEHOLDER_NAMES = frozenset({"", "未命名学生", "未命名学生", "待补姓名"})
 
 STUDENT_ASSIGNED = "STUDENT_ASSIGNED"
@@ -165,8 +166,8 @@ def assign_student(
     prev = row.assignee_user_id
     if assignee_user_id is not None:
         staff = db.query(User).filter(User.id == assignee_user_id).first()
-        if not staff or (staff.role or "").lower() not in STAFF_ROLES:
-            raise ValueError("assignee must be an admin/consultant/support user id")
+        if not staff or not staff.is_active or (staff.role or "").lower() not in ASSIGNABLE_ROLES:
+            raise ValueError("assignee must be an active consultant/admin")
         row.assignee_user_id = assignee_user_id
         row.assigned_at = datetime.utcnow()
         row.assigned_by_user_id = operator.id
@@ -190,6 +191,15 @@ def assign_student(
         db,
         actor_user_id=operator.id,
         action=action,
+        resource_type="student_master_profile",
+        resource_id=row.id,
+        student_id=row.id,
+        metadata={"from_user": prev, "to_user": row.assignee_user_id, "operator": operator.id},
+    )
+    admin_audit.record_audit(
+        db,
+        actor_user_id=operator.id,
+        action="STUDENT_ASSIGNMENT_CHANGE",
         resource_type="student_master_profile",
         resource_id=row.id,
         student_id=row.id,
@@ -334,9 +344,11 @@ def patch_crm_fields(
     return crm_snapshot(db, row)
 
 
-def dashboard_crm_todos(db: Session) -> dict[str, Any]:
+def dashboard_crm_todos(db: Session, *, assignee_user_id: int | None = None) -> dict[str, Any]:
     now = datetime.utcnow()
     base = db.query(StudentMasterProfile).filter(StudentMasterProfile.status != "DELETED")
+    if assignee_user_id:
+        base = base.filter(StudentMasterProfile.assignee_user_id == assignee_user_id)
 
     def _ids(q) -> list[int]:
         return [r.id for r in q.limit(100).all()]

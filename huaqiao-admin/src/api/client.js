@@ -128,6 +128,38 @@ export const api = {
   aiPublish: (id, draftId) =>
     request(`/api/admin/v1/students/${id}/ai-drafts/${draftId}/publish`, { method: 'POST' }),
   settings: () => request('/api/admin/v1/settings'),
+  nav: () => request('/api/admin/v1/nav'),
+  employees: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+    })
+    const qs = q.toString()
+    return request(`/api/admin/v1/employees${qs ? `?${qs}` : ''}`)
+  },
+  employee: (id) => request(`/api/admin/v1/employees/${id}`),
+  createEmployee: (data) =>
+    request('/api/admin/v1/employees', { method: 'POST', body: JSON.stringify(data) }),
+  patchEmployee: (id, data) =>
+    request(`/api/admin/v1/employees/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  disableEmployee: (id) =>
+    request(`/api/admin/v1/employees/${id}/disable`, { method: 'POST' }),
+  enableEmployee: (id) =>
+    request(`/api/admin/v1/employees/${id}/enable`, { method: 'POST' }),
+  resetEmployeePassword: (id, password) =>
+    request(`/api/admin/v1/employees/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+  changeOwnPassword: (password) =>
+    request('/api/admin/v1/me/password', { method: 'POST', body: JSON.stringify({ password }) }),
+  consultants: () => request('/api/admin/v1/consultants'),
+  consultant360: (id) => request(`/api/admin/v1/consultants/${id}`),
+  followUpCenter: (bucket = 'today') =>
+    request(`/api/admin/v1/follow-up-center?bucket=${encodeURIComponent(bucket)}`),
+  auditEvents: (action) =>
+    request(`/api/admin/v1/audit-events${action ? `?action=${encodeURIComponent(action)}` : ''}`),
+  rbacCatalog: () => request('/api/admin/v1/rbac'),
   consultations: () => request('/api/admin/expert-consultations'),
   notifications: (params = {}) => {
     const q = new URLSearchParams()

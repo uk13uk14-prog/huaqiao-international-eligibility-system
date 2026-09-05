@@ -121,20 +121,19 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
-      - name: Check saas-pro migrations (through 010)
+      - name: Check saas-pro migrations (through 011)
         env:
           DATABASE_URL: postgresql+psycopg://huaqiao:test@localhost:5432/huaqiao_saas
         run: |
           cd huaqiao-saas-pro/backend
           pip install -r requirements-locked.txt "psycopg[binary]==3.2.3"
           alembic upgrade head
+          alembic current | grep -q 011_admin_console_v2
+          alembic downgrade 010_student_crm_v1
           alembic current | grep -q 010_student_crm_v1
-          # Prove 009↔010 cycle (CRM additive migration)
+          alembic upgrade head
+          alembic current | grep -q 011_admin_console_v2
           alembic downgrade 009_csca_notification_rules
           alembic current | grep -q 009_csca_notification_rules
           alembic upgrade head
-          alembic current | grep -q 010_student_crm_v1
-          # Prove 008→010 path still works
-          alembic downgrade 008_notification_center_v1
-          alembic upgrade head
-          alembic current | grep -q 010_student_crm_v1
+          alembic current | grep -q 011_admin_console_v2

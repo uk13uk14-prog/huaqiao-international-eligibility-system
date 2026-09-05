@@ -2,7 +2,7 @@
   <div class="login-wrap">
     <div class="login-card gq-panel">
       <div class="gq-brand">国侨升学运营后台</div>
-      <p class="gq-muted">GUOQIAO ADMIN + AI EXPERT CONSOLE V1</p>
+      <p class="gq-muted">国侨升学运营后台 V2</p>
       <p class="gq-muted">API：{{ apiBaseLabel }}</p>
       <el-form @submit.prevent="onLogin" label-position="top" style="margin-top:16px">
         <el-form-item label="邮箱">

@@ -54,10 +54,20 @@ def create_token(db: Session, user: User) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
+        "role": user.role or "",
+        "account_kind": getattr(user, "account_kind", None) or "",
         "iat": now,
         "exp": now + timedelta(minutes=120),
         "jti": secrets.token_urlsafe(16),
     }
+    try:
+        from .admin_rbac import capabilities_for, resolve_console_role
+        console = resolve_console_role(user)
+        payload["console_role"] = console.value if console else None
+        payload["permissions"] = capabilities_for(user)
+    except Exception:
+        payload["console_role"] = None
+        payload["permissions"] = []
     token = jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
     # Store in AuthToken table for revocation support
     db.add(AuthToken(user_id=user.id, token=token))
