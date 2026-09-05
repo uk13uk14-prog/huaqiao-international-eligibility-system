@@ -10,6 +10,13 @@ import StudentsView from '../views/StudentsView.vue'
 import Student360View from '../views/Student360View.vue'
 import ConsultationsView from '../views/ConsultationsView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import EmployeesView from '../views/EmployeesView.vue'
+import ConsultantsView from '../views/ConsultantsView.vue'
+import Consultant360View from '../views/Consultant360View.vue'
+import RolesView from '../views/RolesView.vue'
+import AuditLogView from '../views/AuditLogView.vue'
+import MyStudentsView from '../views/MyStudentsView.vue'
+import FollowUpCenterView from '../views/FollowUpCenterView.vue'
 import MobileHomeView from '../mobile/MobileHomeView.vue'
 import MobileStudentsView from '../mobile/MobileStudentsView.vue'
 import MobileStudent360View from '../mobile/MobileStudent360View.vue'
@@ -35,6 +42,16 @@ const router = createRouter({
         { path: 'students/:studentId', component: Student360View, props: true },
         { path: 'consultations', component: ConsultationsView },
         { path: 'settings', component: SettingsView },
+        { path: 'employees', component: EmployeesView },
+        { path: 'consultants', component: ConsultantsView },
+        { path: 'consultants/:consultantId', component: Consultant360View, props: true },
+        { path: 'roles', component: RolesView },
+        { path: 'audit', component: AuditLogView },
+        { path: 'my-students', component: MyStudentsView },
+        { path: 'follow-ups', component: FollowUpCenterView, meta: { bucket: 'upcoming' } },
+        { path: 'tasks/today', component: FollowUpCenterView, meta: { bucket: 'today' } },
+        { path: 'tasks/overdue', component: FollowUpCenterView, meta: { bucket: 'overdue' } },
+        { path: 'ai/queue', component: MobileApprovalView },
 
         /* Mobile ops shell — same API / JWT as desktop */
         { path: 'm/home', component: MobileHomeView, meta: { mobile: true } },

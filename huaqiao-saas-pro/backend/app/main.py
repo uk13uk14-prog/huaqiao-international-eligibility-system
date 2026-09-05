@@ -68,9 +68,11 @@ audit_logger = AuditLogger()
 app = FastAPI(title=settings.app_name, version="1.0.0", description="国际生资格智评系统 SaaS Pro API")
 from .student_api import router as student_router
 from .admin_v1_api import router as admin_v1_router
+from .admin_v2_api import router as admin_v2_router
 from .notification_api import router as notification_router
 app.include_router(student_router)
 app.include_router(admin_v1_router)
+app.include_router(admin_v2_router)
 app.include_router(notification_router)
 
 # Rate limiter
@@ -181,6 +183,8 @@ def register(request: Request, data: RegisterIn, db: Session = Depends(get_db)):
         password_hash=hash_password(data.password),
         role="member",
         plan_code="free",
+        account_kind="CUSTOMER",
+        must_change_password=False,
     )
     # New registrations only: 7-day Pro Trial (does not rewrite existing users).
     grant_new_user_pro_trial(user)
@@ -195,6 +199,8 @@ def login(request: Request, data: LoginIn, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user:
         raise HTTPException(status_code=401, detail="账号或密码错误")
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="账号已停用")
     if not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="账号或密码错误")
     # Legacy SHA256 migration: if hash doesn't start with $2b$, it's old format
@@ -204,7 +210,16 @@ def login(request: Request, data: LoginIn, db: Session = Depends(get_db)):
             db.commit()
         else:
             raise HTTPException(status_code=401, detail="账号或密码错误")
-    return {"token": create_token(db, user), "user": user_payload(user, db)}
+    token = create_token(db, user)
+    try:
+        from .services.admin_staff import mark_login
+        mark_login(db, user)
+    except Exception:
+        pass
+    payload = user_payload(user, db)
+    payload["must_change_password"] = bool(getattr(user, "must_change_password", False))
+    payload["account_kind"] = getattr(user, "account_kind", None) or "CUSTOMER"
+    return {"token": token, "user": payload}
 
 
 @app.get("/api/me")

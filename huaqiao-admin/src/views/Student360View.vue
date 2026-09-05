@@ -29,6 +29,16 @@
           <el-option v-for="(label, key) in stageLabels" :key="key" :label="label" :value="key" />
         </el-select>
         <el-button size="small" @click="saveStage">更新阶段</el-button>
+        <el-select v-model="riskEdit" placeholder="风险" style="width:120px">
+          <el-option label="无" value="NONE" />
+          <el-option label="低" value="LOW" />
+          <el-option label="中" value="MEDIUM" />
+          <el-option label="高" value="HIGH" />
+          <el-option label="严重" value="CRITICAL" />
+        </el-select>
+        <el-input v-model="nextEdit" placeholder="下一步" style="width:180px" />
+        <el-input v-model="followAtEdit" placeholder="下次跟进 YYYY-MM-DD" style="width:180px" />
+        <el-button size="small" @click="saveCrmExtras">保存跟进计划</el-button>
       </div>
     </header>
 
@@ -330,6 +340,9 @@ const msg = ref('')
 const staff = ref([])
 const assignTo = ref(0)
 const stageEdit = ref('')
+const riskEdit = ref('NONE')
+const nextEdit = ref('')
+const followAtEdit = ref('')
 const stageLabels = ref({})
 const followContent = ref('')
 const followNext = ref('')
@@ -526,6 +539,15 @@ async function saveStage() {
   ElMessage.success('阶段已更新')
   await load()
 }
+async function saveCrmExtras() {
+  await api.patchStudentCrm(props.studentId, {
+    risk_level: riskEdit.value || undefined,
+    next_action: nextEdit.value || undefined,
+    next_follow_up_at: followAtEdit.value || undefined,
+  })
+  ElMessage.success('跟进计划已保存')
+  await load()
+}
 async function saveFollowUp() {
   if (!followContent.value.trim()) return
   await api.createFollowUp(props.studentId, { content: followContent.value, next_action: followNext.value || null, source: 'HUMAN' })
@@ -548,6 +570,9 @@ async function load() {
   data.value = await api.student360(props.studentId)
   kinds.value = data.value.report_kinds || {}
   stageEdit.value = data.value.crm?.crm_stage || ''
+  riskEdit.value = data.value.crm?.risk_level || 'NONE'
+  nextEdit.value = data.value.crm?.next_action || ''
+  followAtEdit.value = (data.value.crm?.next_follow_up_at || '').slice(0, 10)
   stageLabels.value = data.value.crm_stage_labels || {
     UNASSIGNED: '未分配', NEW: '新学生', CONTACTED: '已联系', PLANNING: '规划中',
     WAITING_STUDENT: '等待学生', WAITING_DOCUMENTS: '等待材料', APPLICATION: '申请中',

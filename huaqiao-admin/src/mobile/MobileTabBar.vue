@@ -23,7 +23,7 @@ const router = useRouter()
 const items = [
   { to: '/m/home', label: '首页', icon: '⌂', match: ['/m/home'] },
   { to: '/m/students', label: '学生', icon: '学', match: ['/m/students'] },
-  { to: '/m/approval', label: '审核', icon: '审', match: ['/m/approval'] },
+  { to: '/follow-ups', label: '待跟进', icon: '跟', match: ['/follow-ups', '/tasks'] },
   { to: '/m/notifications', label: '通知', icon: '铃', match: ['/m/notifications'] },
   { to: '/m/me', label: '我的', icon: '我', match: ['/m/me'] },
 ]

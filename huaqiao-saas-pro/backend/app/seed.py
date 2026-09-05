@@ -193,7 +193,7 @@ def seed_data(db: Session):
     if db.query(Tenant).count() == 0:
         tenant = Tenant(name="SaaS Pro 管理后台", tenant_type="platform")
         db.add(tenant); db.flush()
-        db.add(User(tenant_id=tenant.id, email="admin@example.com", name="平台管理员", password_hash=hash_password("admin123456"), role="admin", plan_code="lifetime"))
+        db.add(User(tenant_id=tenant.id, email="admin@example.com", name="平台管理员", password_hash=hash_password("admin123456"), role="admin", plan_code="lifetime", account_kind="STAFF", job_title="管理员"))
         demo = Tenant(name="国际生规划示范机构", tenant_type="agency")
         db.add(demo); db.flush()
         db.add(User(tenant_id=demo.id, email="demo@example.com", name="示范顾问", password_hash=hash_password("demo123456"), role="member", plan_code="free"))

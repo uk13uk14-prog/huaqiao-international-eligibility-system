@@ -25,11 +25,16 @@ from .services import notifications as notif
 from .services import admin_audit
 from .services.admin_privacy import public_student_meta, redact_profile_for_admin
 from .services.admin_rbac import (
+    AdminConsoleRole,
+    capabilities_for,
+    consultant_scoped,
+    menu_for,
     rbac_proposal,
     require_admin_console,
     require_capability,
     resolve_console_role,
 )
+from .services.admin_rbac import ROLE_LABEL_ZH
 from .services.membership_trial import is_trial_plan, trial_info
 from .services.security import is_paid
 from .services.student_profile import empty_profile, normalize_profile, profile_summary
@@ -83,7 +88,19 @@ def _user_brief(u: User | None) -> dict | None:
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "is_active": u.is_active,
         "tenant_id": u.tenant_id,
+        "account_kind": getattr(u, "account_kind", None) or ("STAFF" if (u.role or "") in {"admin", "super_admin", "operations_admin", "consultant", "support"} else "CUSTOMER"),
+        "job_title": getattr(u, "job_title", None) or "",
+        "last_login_at": u.last_login_at.isoformat() if getattr(u, "last_login_at", None) else None,
+        "must_change_password": bool(getattr(u, "must_change_password", False)),
     }
+
+
+def _assert_student_visible(admin: User, row: StudentMasterProfile, *, write: bool = False) -> None:
+    role = resolve_console_role(admin)
+    if consultant_scoped(admin) and row.assignee_user_id != admin.id:
+        raise HTTPException(status_code=403, detail="只能查看分配给自己的学生")
+    if write and role == AdminConsoleRole.SUPPORT:
+        raise HTTPException(status_code=403, detail="客服不能修改学生档案")
 
 
 def _get_student_or_404(db: Session, student_id: int) -> StudentMasterProfile:
@@ -265,6 +282,10 @@ def admin_me(admin: User = Depends(require_admin_console)):
     return {
         "user": _user_brief(admin),
         "console_role": console.value if console else None,
+        "role_label": ROLE_LABEL_ZH.get(console.value if console else "", ""),
+        "permissions": capabilities_for(admin),
+        "menu": menu_for(admin),
+        "must_change_password": bool(getattr(admin, "must_change_password", False)),
         "rbac": rbac_proposal(),
         "ai_provider": ai.provider_status(),
         "contract": ADMIN_V1_CONTRACT,
@@ -300,7 +321,22 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
         .count()
     )
     recent = db.query(ExpertConsultation).order_by(ExpertConsultation.created_at.desc()).limit(10).all()
+    scoped_assignee = admin.id if consultant_scoped(admin) else None
+    role = resolve_console_role(admin)
+    my_students = None
+    if scoped_assignee:
+        my_students = (
+            db.query(StudentMasterProfile)
+            .filter(
+                StudentMasterProfile.assignee_user_id == admin.id,
+                StudentMasterProfile.status != "DELETED",
+            )
+            .count()
+        )
     return {
+        "dashboard_role": role.value if role else None,
+        "scope": "assignee" if scoped_assignee else "org",
+        "my_students": my_students,
         "total_users": total_users,
         "trial_users": trial_users,
         "paid_users": paid_users,
@@ -320,7 +356,7 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
             for r in recent
         ],
         "bi": "simple_v1",
-        "crm_todos": crm.dashboard_crm_todos(db),
+        "crm_todos": crm.dashboard_crm_todos(db, assignee_user_id=scoped_assignee),
     }
 
 
@@ -333,6 +369,10 @@ def list_users(
     rows = db.query(User).order_by(User.created_at.desc()).limit(500).all()
     out = []
     for u in rows:
+        if (u.role or "").lower() in {"admin", "super_admin", "operations_admin", "consultant", "support"}:
+            continue
+        if (getattr(u, "account_kind", None) or "").upper() == "STAFF":
+            continue
         if q:
             ql = q.lower()
             if ql not in (u.email or "").lower() and ql not in (u.name or "").lower() and ql != str(u.id):
@@ -383,6 +423,8 @@ def list_students(
 ):
     """Student CRM list V2 — operational columns; never returns cipher_blob."""
     query = db.query(StudentMasterProfile).filter(StudentMasterProfile.status != "DELETED")
+    if consultant_scoped(admin):
+        assignee_user_id = admin.id
     if assignee_user_id is not None:
         if assignee_user_id == 0:
             query = query.filter(StudentMasterProfile.assignee_user_id.is_(None))
@@ -479,6 +521,7 @@ def student_360(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     owner = db.query(User).filter(User.id == row.user_id).first()
     role = _console_role_str(admin)
     raw = _decrypt_student_profile(row)
@@ -544,7 +587,8 @@ def student_timeline(
     admin: User = Depends(require_capability("admin.student360.read")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, "timeline": _timeline_for(db, student_id)}
 
 
@@ -555,6 +599,7 @@ def student_eligibility(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, **_map_eligibility(db, row)}
 
 
@@ -565,6 +610,7 @@ def student_consultations(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, **_map_consultations(db, row)}
 
 
@@ -589,7 +635,8 @@ def list_ai_drafts(
     admin: User = Depends(require_capability("admin.ai.generate")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     drafts = ai.list_for_student(db, student_id)
     return {
         "student_id": student_id,
@@ -607,6 +654,7 @@ async def create_ai_draft(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     if row.id != student_id:
         raise HTTPException(status_code=500, detail="student_id isolation violation")
     profile = _decrypt_student_profile(row)
@@ -654,7 +702,8 @@ def patch_ai_draft(
     admin: User = Depends(require_capability("admin.ai.edit")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.edit_draft(
             db,
@@ -689,7 +738,8 @@ def approve_ai_draft(
     admin: User = Depends(require_capability("admin.ai.approve")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.approve_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
     except KeyError:
@@ -718,7 +768,8 @@ def publish_ai_draft(
     db: Session = Depends(get_db),
 ):
     """Publish only APPROVED drafts bound to this student_id. Never auto from AI."""
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     try:
         updated = ai.publish_draft(db, student_id=student_id, draft_id=draft_id, actor=admin)
     except KeyError:
@@ -744,14 +795,15 @@ def publish_ai_draft(
 
 
 @router.get("/settings")
-def settings_view(admin: User = Depends(require_capability("admin.settings"))):
+def settings_view(admin: User = Depends(require_capability("settings.read"))):
     return {
         "admin_domain": "https://admin.guoqiaoplan.com",
         "rbac": rbac_proposal(),
         "ai_provider": ai.provider_status(),
         "contract": ADMIN_V1_CONTRACT,
         "migration_status": {
-            "draft_file": "alembic/drafts/007_admin_ai_expert_v1_NOT_APPLIED.py",
+            "alembic_head_code": "011_admin_console_v2",
+            "production_expected": "010_student_crm_v1",
             "applied": False,
             "production_db_changed": False,
         },
@@ -784,6 +836,7 @@ def update_student_csca(
     from .services.vault_crypto import encrypt_profile_json
 
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=True)
     raw = _decrypt_student_profile(row)
     current = normalize_csca(raw.get("csca"))
     data = payload.model_dump(exclude_unset=True)
@@ -877,10 +930,11 @@ def list_staff(admin: User = Depends(require_capability("admin.students.read")),
 def assign_student_endpoint(
     student_id: int,
     payload: AssignStudentIn,
-    admin: User = Depends(require_capability("admin.student360.write")),
+    admin: User = Depends(require_capability("students.assign")),
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=True)
     try:
         snap = crm.assign_student(db, row=row, assignee_user_id=payload.assignee_user_id, operator=admin)
     except ValueError as exc:
@@ -896,6 +950,7 @@ def patch_student_crm(
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=True)
     try:
         snap = crm.patch_crm_fields(
             db,
@@ -919,7 +974,8 @@ def get_follow_ups(
     admin: User = Depends(require_capability("admin.student360.read")),
     db: Session = Depends(get_db),
 ):
-    _get_student_or_404(db, student_id)
+    row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     return {"student_id": student_id, "follow_ups": crm.list_follow_ups(db, student_id)}
 
 
@@ -927,10 +983,11 @@ def get_follow_ups(
 def post_follow_up(
     student_id: int,
     payload: FollowUpCreateIn,
-    admin: User = Depends(require_capability("admin.student360.write")),
+    admin: User = Depends(require_capability("followups.write")),
     db: Session = Depends(get_db),
 ):
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     nxt = None
     if payload.next_follow_up_at:
         nxt = datetime.fromisoformat(payload.next_follow_up_at.replace("Z", ""))
@@ -959,6 +1016,7 @@ def ai_follow_up_drafts(
 ):
     """AI follow-up suggestions — DRAFT only, never auto-send."""
     row = _get_student_or_404(db, student_id)
+    _assert_student_visible(admin, row, write=False)
     raw = _decrypt_student_profile(row)
     snap = crm.crm_snapshot(db, row, raw)
     drafts = crm.ai_follow_up_drafts(student_id=student_id, crm=snap)
