@@ -2,33 +2,59 @@
   <div v-if="data" class="m-page">
     <header class="m-hd">
       <button type="button" class="back" @click="$router.back()">‹ 返回</button>
-      <h1>{{ data.ops_header?.display_name || data.meta?.display_name || `学生 #${data.student_id}` }}</h1>
-      <p class="gq-muted">#{{ data.student_id }} · {{ data.owner?.email || '—' }}</p>
+      <h1>{{ displayName }}</h1>
+      <p class="gq-muted">#{{ data.student_id }} · {{ human(owner.email) }}</p>
       <div class="ops-banner">
-        <div>负责人：{{ data.ops_header?.assignee_label || data.crm?.assignee_label || '未分配' }}</div>
-        <div>阶段：{{ data.ops_header?.crm_stage_label || data.crm?.crm_stage_label || '—' }}</div>
-        <div>下一步：{{ data.ops_header?.next_action || data.crm?.next_action || '—' }}</div>
-        <div>跟进：{{ data.ops_header?.next_follow_up_at || data.crm?.next_follow_up_at || '—' }}</div>
+        <div class="hi"><span class="k">负责人</span><span class="v">{{ human(crm.assignee_label || ops.assignee_label, EMPTY.unassigned) }}</span></div>
+        <div class="hi"><span class="k">阶段</span><span class="v">{{ human(crm.crm_stage_label || ops.crm_stage_label, EMPTY.unassigned) }}</span></div>
+        <div class="hi"><span class="k">风险</span><span class="v"><el-tag size="small" :type="riskTagType(crm.risk_level)">{{ riskLabel(crm.risk_level) }}</el-tag></span></div>
+        <div class="hi"><span class="k">下一步</span><span class="v">{{ human(crm.next_action || ops.next_action) }}</span></div>
+        <div><span class="k">下次跟进</span><span class="v">{{ humanDateTime(crm.next_follow_up_at || ops.next_follow_up_at) }}</span></div>
+        <div><span class="k">套餐</span><span class="v">{{ planLabel }}</span></div>
       </div>
       <div class="quick">
-        <button type="button" @click="tab='follow'">记跟进</button>
+        <button type="button" @click="tab = 'follow'">记跟进</button>
         <button type="button" @click="$router.push(`/m/ai/${studentId}`)">AI建议</button>
-        <button type="button" @click="tab='timeline'">时间线</button>
-        <button type="button" @click="tab='consult'">专家规划</button>
+        <button type="button" @click="tab = 'timeline'">时间线</button>
+        <button type="button" @click="tab = 'consult'">专家规划</button>
       </div>
     </header>
 
     <el-tabs v-model="tab" class="tabs">
       <el-tab-pane label="概览" name="overview">
         <section class="gq-panel block">
-          <h3>资格</h3>
-          <el-tag>{{ data.eligibility?.mapping_status || '—' }}</el-tag>
-          <p><strong>国际生：</strong>{{ data.eligibility?.international?.conclusion || '—' }}</p>
-          <p><strong>华侨生：</strong>{{ data.eligibility?.huaqiao?.conclusion || '—' }}</p>
+          <h3>学生概览</h3>
+          <dl class="dl">
+            <div><dt>姓名</dt><dd>{{ displayName }}</dd></div>
+            <div><dt>身份路线</dt><dd>{{ human(crm.identity_track || identityRoute) }}</dd></div>
+            <div><dt>所属账号</dt><dd>{{ human(owner.email || owner.name) }}</dd></div>
+            <div><dt>最后更新</dt><dd>{{ humanDateTime(meta.updated_at) }}</dd></div>
+          </dl>
         </section>
         <section class="gq-panel block">
-          <h3>目标提示</h3>
-          <p>{{ data.meta?.goal_hint || '—' }}</p>
+          <h3>资格</h3>
+          <div class="elig-row">
+            <span>国际生</span>
+            <el-tag size="small" :type="eligIntl.type">{{ eligIntl.label }}</el-tag>
+          </div>
+          <div class="elig-row">
+            <span>华侨生</span>
+            <el-tag size="small" :type="eligHq.type">{{ eligHq.label }}</el-tag>
+          </div>
+        </section>
+        <section class="gq-panel block">
+          <h3>CSCA</h3>
+          <dl class="dl">
+            <div><dt>状态</dt><dd>{{ cscaStatusLabel(csca.csca_status, csca.csca_status_label) }}</dd></div>
+            <div><dt>考试日期</dt><dd>{{ humanDate(csca.csca_exam_date, EMPTY.official) }}</dd></div>
+            <div><dt>成绩</dt><dd>{{ human(csca.csca_score) }}</dd></div>
+          </dl>
+        </section>
+        <section class="gq-panel block">
+          <h3>下一步 / 风险</h3>
+          <p><strong>下一步：</strong>{{ human(crm.next_action || ops.next_action) }}</p>
+          <p><strong>时间线：</strong>{{ timelineRiskHint }}</p>
+          <p><strong>最近跟进：</strong>{{ human(latestFollowHint, EMPTY.none) }}</p>
         </section>
         <el-button type="primary" style="width:100%" @click="$router.push(`/m/ai/${studentId}`)">
           打开 AI 专家
@@ -36,21 +62,116 @@
       </el-tab-pane>
 
       <el-tab-pane label="档案" name="profile">
-        <details v-for="sec in profileSections" :key="sec.key" class="fold" :open="sec.open">
-          <summary>{{ sec.label }}</summary>
-          <pre class="gq-pre">{{ pretty(sec.value) }}</pre>
-        </details>
+        <section class="gq-panel block">
+          <h3>基本资料</h3>
+          <dl class="dl">
+            <div><dt>学生姓名</dt><dd>{{ human(basic.chinese_name || displayName) }}</dd></div>
+            <div><dt>英文名</dt><dd>{{ human(basic.english_name) }}</dd></div>
+            <div><dt>出生日期</dt><dd>{{ humanDate(basic.birth_date) }}</dd></div>
+            <div><dt>性别</dt><dd>{{ human(basic.gender) }}</dd></div>
+            <div><dt>国家 / 城市</dt><dd>{{ human(basic.current_country) }} / {{ human(basic.current_city) }}</dd></div>
+            <div><dt>联系方式</dt><dd>{{ human(basic.contact) }}</dd></div>
+            <div><dt>入学年份</dt><dd>{{ human(basic.intended_entry_year) }}</dd></div>
+            <div><dt>所属用户</dt><dd>{{ human(owner.name) }} · {{ human(owner.email) }}</dd></div>
+            <div><dt>套餐 / Trial</dt><dd>{{ planLabel }} · {{ trialLabel }}</dd></div>
+          </dl>
+        </section>
+
+        <section class="gq-panel block">
+          <h3>身份 / 国籍</h3>
+          <dl class="dl">
+            <div><dt>出生国家</dt><dd>{{ human(identity.birth_country) }}</dd></div>
+            <div><dt>当前国籍</dt><dd>{{ human(identity.current_nationality) }}</dd></div>
+            <div><dt>曾用国籍</dt><dd>{{ human(identity.former_nationalities) }}</dd></div>
+            <div><dt>曾有中国国籍</dt><dd>{{ humanBool(identity.had_chinese_nationality) }}</dd></div>
+            <div><dt>中国户籍</dt><dd>{{ humanBool(identity.has_chinese_hukou) }}</dd></div>
+            <div><dt>国际生状态</dt><dd>{{ human(identity.international?.status || identity.international?.conclusion, EMPTY.judge) }}</dd></div>
+            <div><dt>华侨生状态</dt><dd>{{ human(identity.huaqiao?.status || identity.huaqiao?.conclusion, EMPTY.judge) }}</dd></div>
+          </dl>
+        </section>
+
+        <section class="gq-panel block">
+          <h3>教育背景</h3>
+          <dl class="dl">
+            <div><dt>当前学校</dt><dd>{{ human(currentSchool.school_name || currentSchool.name) }}</dd></div>
+            <div><dt>课程体系</dt><dd>{{ human(pick(currentSchool.curriculum, currentSchool.school_type)) }}</dd></div>
+            <div><dt>年级</dt><dd>{{ human(currentSchool.current_grade || currentSchool.grade) }}</dd></div>
+            <div><dt>预计毕业</dt><dd>{{ humanDate(currentSchool.end_date || currentSchool.expected_graduation) }}</dd></div>
+          </dl>
+        </section>
+
+        <section class="gq-panel block">
+          <h3>语言成绩</h3>
+          <article v-for="(row, i) in languageRows" :key="i" class="mini-card">
+            <strong>{{ human(row.exam_type || row.exam) }}</strong>
+            <p>{{ human(row.overall_score || row.score) }} · {{ human(row.level || row.band, '—') }} · {{ human(row.status, '已取得') }}</p>
+          </article>
+          <p v-if="!languageRows.length" class="gq-muted">{{ EMPTY.none }}</p>
+        </section>
+
+        <section class="gq-panel block">
+          <h3>CSCA 考试</h3>
+          <dl class="dl">
+            <div><dt>状态</dt><dd>{{ cscaStatusLabel(csca.csca_status, csca.csca_status_label) }}</dd></div>
+            <div><dt>报名截止</dt><dd>{{ humanDate(csca.csca_registration_deadline, EMPTY.official) }}</dd></div>
+            <div><dt>考试日期</dt><dd>{{ humanDate(csca.csca_exam_date, EMPTY.official) }}</dd></div>
+            <div><dt>成绩发布</dt><dd>{{ humanDate(csca.csca_result_date, EMPTY.official) }}</dd></div>
+            <div><dt>成绩 / 等级</dt><dd>{{ human(csca.csca_score) }} / {{ human(csca.csca_level) }}</dd></div>
+            <div><dt>备注</dt><dd>{{ human(csca.csca_notes, EMPTY.none) }}</dd></div>
+          </dl>
+        </section>
+
+        <section class="gq-panel block">
+          <h3>目标大学 / 专业</h3>
+          <article v-for="(row, i) in targetRows" :key="i" class="mini-card">
+            <strong>{{ human(row.university_name || row.university) }}</strong>
+            <p>{{ human(row.major || row.college) }} · {{ targetPriorityLabel(row.priority_level || row.priority) }} · {{ human(row.status || row.application_route, '—') }}</p>
+          </article>
+          <p v-if="!targetRows.length" class="gq-muted">{{ EMPTY.noTargets }}</p>
+        </section>
       </el-tab-pane>
 
       <el-tab-pane label="时间线" name="timeline">
-        <article v-for="(t, i) in (data.timeline || [])" :key="i" class="tl">
-          <strong>{{ t.title || '事项' }}</strong>
-          <p class="gq-muted">{{ t.deadline || '—' }} · {{ t.status || '—' }}</p>
+        <article v-for="(t, i) in timelineRows" :key="i" class="tl">
+          <strong>{{ human(t.title || t.name) }}</strong>
+          <p class="gq-muted">
+            {{ humanDate(t.deadline || t.target_date) }}
+            · {{ timelineStatusLabel(t.status) }}
+            · {{ daysRemainingLabel(t.deadline || t.target_date) }}
+          </p>
         </article>
-        <p v-if="!(data.timeline || []).length" class="gq-muted">暂无时间线</p>
+        <p v-if="!timelineRows.length" class="gq-muted">{{ EMPTY.none }}</p>
+      </el-tab-pane>
+
+      <el-tab-pane label="跟进" name="follow">
+        <div class="follow-form">
+          <el-input v-model="followContent" type="textarea" :rows="3" placeholder="人工跟进内容" />
+          <el-input v-model="followNext" placeholder="下一步" style="margin-top:8px" />
+          <el-button type="primary" style="width:100%;margin-top:8px" @click="saveFollowUp">保存人工跟进</el-button>
+        </div>
+        <article v-for="(row, i) in followRows" :key="i" class="tl">
+          <div class="row">
+            <strong>{{ humanDateTime(row.created_at) }}</strong>
+            <el-tag size="small" :type="followSourceTag(row.source)">{{ followSourceLabel(row.source) }}</el-tag>
+          </div>
+          <p>{{ human(row.summary || row.content) }}</p>
+          <p class="gq-muted">下一步：{{ human(row.next_action, '—') }} · {{ human(row.operator_label || row.operator_name, '—') }}</p>
+        </article>
+        <p v-if="!followRows.length" class="gq-muted">{{ EMPTY.none }}</p>
       </el-tab-pane>
 
       <el-tab-pane label="咨询" name="consult">
+        <section class="gq-panel block ai-ctx">
+          <h3>AI 上下文摘要</h3>
+          <ul>
+            <li>学生：{{ displayName }}</li>
+            <li>目标：{{ human(goalHint, EMPTY.noTargets) }}</li>
+            <li>资格：国际生 {{ eligIntl.label }} · 华侨生 {{ eligHq.label }}</li>
+            <li>CSCA：{{ cscaStatusLabel(csca.csca_status, csca.csca_status_label) }}</li>
+            <li>时间线风险：{{ timelineRiskHint }}</li>
+            <li>下一步：{{ human(crm.next_action || ops.next_action) }}</li>
+          </ul>
+        </section>
         <article
           v-for="d in history"
           :key="d.id"
@@ -62,14 +183,14 @@
             <strong>{{ kindLabel(d.report_kind) }}</strong>
             <el-tag size="small" :type="statusType(d.status)">{{ d.status }}</el-tag>
           </div>
-          <p class="gq-muted">#{{ d.id }} · {{ d.updated_at || d.created_at }}</p>
+          <p class="gq-muted">#{{ d.id }} · {{ humanDateTime(d.updated_at || d.created_at) }}</p>
         </article>
-        <p v-if="!history.length" class="gq-muted">暂无 AI 草稿</p>
+        <p v-if="!history.length" class="gq-muted">{{ EMPTY.none }}</p>
       </el-tab-pane>
     </el-tabs>
 
     <MobileBottomSheet v-model="sheetOpen" :title="sheetTitle">
-      <pre class="gq-pre sheet-pre">{{ sheetBody }}</pre>
+      <div class="sheet-body">{{ sheetBody }}</div>
     </MobileBottomSheet>
   </div>
   <div v-else class="pad gq-muted">{{ error || '加载中…' }}</div>
@@ -77,9 +198,28 @@
 
 <script setup>
 import { computed, onMounted, ref, toRef } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
 import { useStudentAi } from '../composables/useStudentAi'
 import MobileBottomSheet from './MobileBottomSheet.vue'
+import {
+  EMPTY,
+  human,
+  humanBool,
+  humanDate,
+  humanDateTime,
+  pick,
+  cscaStatusLabel,
+  riskLabel,
+  riskTagType,
+  eligibilityBadge,
+  followSourceLabel,
+  followSourceTag,
+  timelineStatusLabel,
+  daysRemaining,
+  daysRemainingLabel,
+  targetPriorityLabel,
+} from '../utils/opsDisplay'
 
 const props = defineProps({ studentId: { type: [String, Number], required: true } })
 const data = ref(null)
@@ -88,28 +228,97 @@ const tab = ref('overview')
 const sheetOpen = ref(false)
 const sheetTitle = ref('')
 const sheetBody = ref('')
+const followContent = ref('')
+const followNext = ref('')
 
 const { history, kindLabel, statusType, bootstrap } = useStudentAi(toRef(props, 'studentId'))
 
-const profileSections = computed(() => {
-  const s = data.value?.sections || {}
-  return [
-    { key: 'basic', label: '基本资料 / 所属用户', value: { basic: s.basic_info, owner: data.value?.owner }, open: true },
-    { key: 'identity', label: '身份 / 国籍', value: s.identity, open: false },
-    { key: 'education', label: '教育背景', value: s.education, open: false },
-    { key: 'language', label: '语言成绩', value: s.language_exams, open: false },
-    { key: 'csca', label: 'CSCA考试', value: data.value?.csca_card || s.csca, open: true },
-    { key: 'goals', label: '目标大学 / 专业', value: s.goals, open: false },
-  ]
+const sections = computed(() => data.value?.sections || {})
+const basic = computed(() => sections.value.basic_info || {})
+const identity = computed(() => sections.value.identity || {})
+const education = computed(() => sections.value.education || {})
+const goals = computed(() => sections.value.goals || {})
+const owner = computed(() => data.value?.owner || {})
+const meta = computed(() => data.value?.meta || {})
+const crm = computed(() => data.value?.crm || {})
+const ops = computed(() => data.value?.ops_header || {})
+const csca = computed(() => data.value?.csca_card || sections.value.csca || {})
+const currentSchool = computed(() => education.value.current_school || {})
+const languageRows = computed(() => (Array.isArray(sections.value.language_exams) ? sections.value.language_exams : []))
+const targetRows = computed(() => (Array.isArray(goals.value.targets) ? goals.value.targets : []))
+const timelineRows = computed(() => (Array.isArray(data.value?.timeline) ? data.value.timeline : []))
+const followRows = computed(() => (Array.isArray(data.value?.follow_ups) ? data.value.follow_ups : []))
+
+const displayName = computed(() =>
+  human(pick(ops.value.display_name, crm.value.display_name, meta.value.display_name, basic.value.chinese_name, basic.value.english_name), '待补姓名'),
+)
+const planLabel = computed(() => {
+  const code = owner.value.plan_code
+  if (!code) return EMPTY.pending
+  if (owner.value.is_paid && !String(code).toLowerCase().includes('trial')) return `${code}（付费）`
+  return String(code)
+})
+const trialLabel = computed(() => {
+  const t = owner.value.trial || {}
+  if (t.trial_active) return '试用中'
+  if (t.trial_expired) return '试用已结束'
+  if (owner.value.is_paid) return '非试用 / 付费'
+  return EMPTY.pending
+})
+const identityRoute = computed(() => {
+  const intl = identity.value.international?.status
+  const hq = identity.value.huaqiao?.status
+  if (intl || hq) return [intl && `国际生:${intl}`, hq && `华侨生:${hq}`].filter(Boolean).join(' · ')
+  return null
+})
+const eligIntl = computed(() => eligibilityBadge(data.value?.eligibility?.international?.conclusion, data.value?.eligibility?.international?.qualified))
+const eligHq = computed(() => eligibilityBadge(data.value?.eligibility?.huaqiao?.conclusion, data.value?.eligibility?.huaqiao?.qualified))
+const goalHint = computed(() => {
+  if (!targetRows.value.length) return goals.value.goals_notes || null
+  return targetRows.value.slice(0, 3).map((t) => `${t.university_name || t.university || ''} ${t.major || ''}`.trim()).filter(Boolean).join('；')
+})
+const timelineRiskHint = computed(() => {
+  const rows = timelineRows.value
+  if (!rows.length) return EMPTY.none
+  const overdue = rows.filter((r) => {
+    const n = daysRemaining(r.deadline || r.target_date)
+    return n != null && n < 0 && !/DONE|COMPLETED/i.test(String(r.status || ''))
+  })
+  const soon = rows.filter((r) => {
+    const n = daysRemaining(r.deadline || r.target_date)
+    return n != null && n >= 0 && n <= 7 && !/DONE|COMPLETED/i.test(String(r.status || ''))
+  })
+  if (overdue.length) return `${overdue.length} 项逾期`
+  if (soon.length) return `${soon.length} 项 7 日内到期`
+  return '暂无紧急项'
+})
+const latestFollowHint = computed(() => {
+  const row = followRows.value[0]
+  if (!row) return null
+  return `${humanDateTime(row.created_at, '')} ${row.summary || row.content || ''}`.trim()
 })
 
-function pretty(v) {
-  return JSON.stringify(v ?? {}, null, 2)
-}
 function openDraft(d) {
   sheetTitle.value = `${kindLabel(d.report_kind)} · ${d.status}`
-  sheetBody.value = d.final_report || d.raw_draft || d.content || '(空)'
+  sheetBody.value = d.final_report || d.raw_draft || d.content || '（空）'
   sheetOpen.value = true
+}
+
+async function saveFollowUp() {
+  if (!followContent.value.trim()) return
+  try {
+    await api.createFollowUp(props.studentId, {
+      content: followContent.value,
+      next_action: followNext.value || null,
+      source: 'HUMAN',
+    })
+    followContent.value = ''
+    followNext.value = ''
+    ElMessage.success('跟进已保存')
+    data.value = await api.student360(props.studentId)
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  }
 }
 
 onMounted(async () => {
@@ -128,26 +337,46 @@ onMounted(async () => {
 .m-hd p { margin: 4px 0 8px; }
 .back { border: 0; background: transparent; color: var(--gq-sea); font-size: 15px; padding: 0; }
 .block { margin-bottom: 10px; }
-.fold {
-  border: 1px solid var(--gq-border); border-radius: 10px; background: #fff;
-  margin-bottom: 8px; padding: 8px 10px;
+.block h3 { margin: 0 0 8px; font-size: 15px; }
+.ops-banner {
+  background: #eff6ff;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 8px 0;
+  font-size: 13px;
+  display: grid;
+  gap: 6px;
 }
-.fold summary { cursor: pointer; font-weight: 600; }
-.tl {
-  border: 1px solid var(--gq-border); border-radius: 10px; padding: 10px;
-  background: #fff; margin-bottom: 8px;
+.ops-banner .k { color: #64748b; margin-right: 6px; }
+.ops-banner .v { font-weight: 600; color: #142033; }
+.ops-banner .hi .v { color: #1b4f72; }
+.quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
+.quick button { border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; background: #fff; }
+.dl { margin: 0; display: grid; gap: 6px; }
+.dl > div { display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: 13px; }
+.dl dt { margin: 0; color: #64748b; }
+.dl dd { margin: 0; color: #142033; word-break: break-word; }
+.elig-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; font-size: 13px; }
+.mini-card, .tl {
+  border: 1px solid var(--gq-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  margin-bottom: 8px;
 }
+.mini-card p, .tl p { margin: 4px 0 0; font-size: 13px; }
 .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .pad { padding: 24px 14px; }
-.sheet-pre { max-height: 55vh; }
-.gq-pre {
-  white-space: pre-wrap; font-size: 12px; background: #0f172a; color: #e2e8f0;
-  padding: 10px; border-radius: 8px; overflow: auto; max-height: 240px;
+.ai-ctx ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.sheet-body {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #1e293b;
+  background: #fff;
+  padding: 4px 2px;
+  max-height: 55vh;
+  overflow: auto;
 }
-</style>
-
-<style scoped>
-.ops-banner{background:#eff6ff;border-radius:10px;padding:10px;margin:8px 0;font-size:13px;display:grid;gap:4px}
-.quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px}
-.quick button{border:1px solid #cbd5e1;border-radius:10px;padding:10px;background:#fff}
+.follow-form { margin-bottom: 12px; }
 </style>

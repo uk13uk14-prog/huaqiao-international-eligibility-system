@@ -50,11 +50,14 @@ body {
   .gq-grid-2 { grid-template-columns: 1fr; }
 }
 .gq-pre {
+  /* Ops UI: light readable panel — not a dark debugger block */
   white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
+  font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  background: #f8fafc;
+  color: #1e293b;
+  border: 1px solid var(--gq-border);
   padding: 12px;
   border-radius: 8px;
   max-height: 360px;
