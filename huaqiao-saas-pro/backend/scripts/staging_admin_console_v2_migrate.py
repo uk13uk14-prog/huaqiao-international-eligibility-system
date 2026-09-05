@@ -41,6 +41,28 @@ def revision(eng) -> str:
         return conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar() or ""
 
 
+def has_users(eng) -> bool:
+    with eng.connect() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema='public' AND table_name='users'"
+                )
+            ).scalar()
+        )
+
+
+def rebuild_to_010(eng) -> None:
+    """Staging-only: empty/inconsistent schema → alembic 001…010. Never production."""
+    refuse_prod(STAGING_URL)
+    print("STAGING_REBUILD_TO_010=YES")
+    print("NOTE=staging schema empty or missing users; rebuild 001→010 then cycle 011")
+    with eng.begin() as conn:
+        conn.execute(text("DELETE FROM alembic_version"))
+    command.upgrade(cfg(), EXPECTED_BEFORE)
+
+
 def snap(eng) -> dict:
     q_tables = text(
         "SELECT table_name FROM information_schema.tables "
@@ -81,11 +103,16 @@ def fmt(items: set[str]) -> str:
 
 def main() -> int:
     refuse_prod(STAGING_URL)
+    os.environ["DATABASE_URL"] = STAGING_URL
     os.chdir(BACKEND)
     eng = create_engine(STAGING_URL)
     before_rev = revision(eng)
     print(f"STAGING_DB=huaqiao_admin_staging@127.0.0.1:5432")
-    print(f"STAGING_REVISION_BEFORE={before_rev}")
+    print(f"STAGING_REVISION_BEFORE={before_rev or 'EMPTY'}")
+    if not has_users(eng):
+        rebuild_to_010(eng)
+        before_rev = revision(eng)
+        print(f"STAGING_REVISION_AFTER_REBUILD={before_rev}")
     if before_rev not in {EXPECTED_BEFORE, EXPECTED_AFTER}:
         print(f"UNEXPECTED_REVISION={before_rev}")
         return 2
