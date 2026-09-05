@@ -6,9 +6,14 @@
 #   git pull --ff-only origin cursor/mobile-cloud-preview
 #   bash deploy/api/m1-notification-center-v1-production-release.sh
 #
-# Does: fingerprint → backup → alembic 006→007 → integrity → kickstart SaaS → CORS admin origin
+# Does: fingerprint → backup → alembic 007→008 → integrity → kickstart SaaS → CORS admin origin
 # Does NOT: main merge, CNber, tunnel recreate, Caddy route change, secret regen,
 #           university/timeline mutation, student_id backfill, auto pg_restore, seed, sqlite
+#
+# 008 PARTIAL GUARD (hard):
+#   Only notifications / notification_rules / notification_devices / notification_preferences
+#   count as 008 objects. 007 columns (student_id / ai_provider / audit_events) are NEVER
+#   used to decide MIGRATION_PARTIAL_OR_INCONSISTENT.
 #
 # PRODUCTION DB BINDING (hard):
 #   container=huaqiao-postgres  host=127.0.0.1  port=5433  db=huaqiao  user=from container/env
@@ -16,6 +21,8 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=deploy/api/lib/notification_008_schema_guard.sh
+source "${ROOT}/deploy/api/lib/notification_008_schema_guard.sh"
 BACKEND="${ROOT}/huaqiao-saas-pro/backend"
 ENV_FILE="${BACKEND}/.env"
 BACKUP_DIR="${HOME}/guoqiao-backups"
@@ -226,7 +233,7 @@ run_checkpoint_d_diagnostic() {
 
   [[ -x "${VENV_PY}" ]] || abort "missing ${VENV_PY} — SaaS .venv required (do not use system python3)"
   [[ -f "${BACKEND}/alembic.ini" ]] || abort "missing alembic.ini"
-  [[ -f "${BACKEND}/alembic/versions/008_notification_center_v1.py" ]] || abort "missing 007 migration file"
+  [[ -f "${BACKEND}/alembic/versions/008_notification_center_v1.py" ]] || abort "missing 008 migration file"
 
   echo "PYTHON_VERSION=$("${VENV_PY}" -c 'import sys; print(sys.version.split()[0])')"
 
@@ -254,30 +261,59 @@ run_checkpoint_d_diagnostic() {
   DIRECT_DB_REVISION="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
   echo "DIRECT_DB_REVISION=${DIRECT_DB_REVISION}"
 
-  # Schema evidence (no guessing) — report what exists NOW
+  # 007 schema — informational only (NEVER used for 008 partial detection)
   EC_COLS="$(pg_sql "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='expert_consultations';" | tr -d '[:space:]')"
   ER_COLS="$(pg_sql "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='eligibility_records';" | tr -d '[:space:]')"
   AE_EXISTS="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='audit_events') THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  echo "007_SCHEMA_INFO_ONLY=YES"
   echo "EXPERT_CONSULTATIONS_HAS_student_id=$(echo "${EC_COLS}" | grep -q 'student_id' && echo YES || echo NO)"
   echo "EXPERT_CONSULTATIONS_HAS_ai_provider=$(echo "${EC_COLS}" | grep -q 'ai_provider' && echo YES || echo NO)"
   echo "ELIGIBILITY_HAS_student_id=$(echo "${ER_COLS}" | grep -q 'student_id' && echo YES || echo NO)"
   echo "AUDIT_EVENTS_EXISTS=${AE_EXISTS}"
+  echo "007_SCHEMA_USED_FOR_008_PARTIAL_DETECT=NO"
 
-  # Partial apply detection (007 columns present while still on 006, or vice versa)
-  MIGRATION_PARTIAL_OR_INCONSISTENT=NO
-  if [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]]; then
-    if echo "${EC_COLS}" | grep -q 'ai_provider' || [[ "${AE_EXISTS}" == "YES" ]]; then
-      MIGRATION_PARTIAL_OR_INCONSISTENT=YES
-    fi
-  fi
-  if [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_AFTER}" ]]; then
-    if ! echo "${EC_COLS}" | grep -q 'ai_provider' || [[ "${AE_EXISTS}" != "YES" ]]; then
-      MIGRATION_PARTIAL_OR_INCONSISTENT=YES
-    fi
-  fi
+  # 008 objects ONLY — exact tables from 008_notification_center_v1.py
+  HAS_NOTIFICATIONS="$(pg_sql "SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='notifications'
+  ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  HAS_NOTIFICATION_RULES="$(pg_sql "SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='notification_rules'
+  ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  HAS_NOTIFICATION_DEVICES="$(pg_sql "SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='notification_devices'
+  ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+  HAS_NOTIFICATION_PREFERENCES="$(pg_sql "SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='notification_preferences'
+  ) THEN 'YES' ELSE 'NO' END;" | tr -d '[:space:]')"
+
+  echo "008_HAS_notifications=${HAS_NOTIFICATIONS}"
+  echo "008_HAS_notification_rules=${HAS_NOTIFICATION_RULES}"
+  echo "008_HAS_notification_devices=${HAS_NOTIFICATION_DEVICES}"
+  echo "008_HAS_notification_preferences=${HAS_NOTIFICATION_PREFERENCES}"
+
+  # Must call in current shell (not subshell) so classify vars persist
+  classify_008_schema_state \
+    "${DIRECT_DB_REVISION}" \
+    "${HAS_NOTIFICATIONS}" \
+    "${HAS_NOTIFICATION_RULES}" \
+    "${HAS_NOTIFICATION_DEVICES}" \
+    "${HAS_NOTIFICATION_PREFERENCES}"
+
+  echo "008_OBJECTS_EXPECTED=${N008_OBJECTS_EXPECTED}"
+  echo "008_OBJECT_PRESENT_COUNT=${N008_OBJECT_PRESENT_COUNT}"
+  echo "CLEAN_PRE_008=${CLEAN_PRE_008}"
+  echo "PARTIAL_008=${PARTIAL_008}"
+  echo "ALREADY_UPGRADED=${ALREADY_UPGRADED}"
+  echo "INCONSISTENT_008=${INCONSISTENT_008}"
+  echo "SCHEMA_STATE=${SCHEMA_STATE}"
+  echo "ALLOW_008_UPGRADE=${ALLOW_008_UPGRADE}"
   echo "MIGRATION_PARTIAL_OR_INCONSISTENT=${MIGRATION_PARTIAL_OR_INCONSISTENT}"
   if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT}" == "YES" ]]; then
-    echo "NOTE=Schema/alembic_version inconsistency detected — do NOT guess; inspect before re-run upgrade"
+    echo "NOTE=008 schema/alembic_version inconsistency — do NOT guess; inspect 008 tables before upgrade"
   fi
 
   # Alembic current/heads via bound .venv (stderr captured — never discarded)
@@ -336,11 +372,11 @@ report_migration_failure() {
   local after_rev
   after_rev="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null | tr -d '[:space:]' || echo UNKNOWN)"
   echo "DB_REVISION_AFTER_FAILED_ATTEMPT=${after_rev}"
-  # Schema evidence after failed attempt
-  local ae
-  ae="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='audit_events') THEN 'YES' ELSE 'NO' END;" 2>/dev/null | tr -d '[:space:]' || echo UNKNOWN)"
-  echo "AUDIT_EVENTS_EXISTS_AFTER_FAIL=${ae}"
-  if [[ "${after_rev}" == "${EXPECTED_BEFORE}" && "${ae}" == "NO" ]]; then
+  # 008 schema evidence after failed attempt (not 007 audit_events)
+  local n_after
+  n_after="$(pg_sql "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='notifications') THEN 'YES' ELSE 'NO' END;" 2>/dev/null | tr -d '[:space:]' || echo UNKNOWN)"
+  echo "008_HAS_notifications_AFTER_FAIL=${n_after}"
+  if [[ "${after_rev}" == "${EXPECTED_BEFORE}" && "${n_after}" == "NO" ]]; then
     echo "PG_TRANSACTION_LIKELY_ROLLED_BACK=YES"
     echo "ROLLBACK_REQUIRED=NO"
     ROLLBACK_REQUIRED=NO
@@ -365,7 +401,7 @@ cd "${ROOT}"
 git fetch origin cursor/mobile-cloud-preview
 git checkout cursor/mobile-cloud-preview
 git pull --ff-only origin cursor/mobile-cloud-preview
-test -f "${BACKEND}/alembic/versions/008_notification_center_v1.py" || abort "007 migration file missing after pull"
+test -f "${BACKEND}/alembic/versions/008_notification_center_v1.py" || abort "008 migration file missing after pull"
 
 docker inspect -f '{{.State.Running}}' "${PG_CONTAINER}" 2>/dev/null | grep -qx true \
   || abort "huaqiao-postgres not running"
@@ -499,13 +535,22 @@ echo "MIGRATION_ALLOWED_ONLY_AFTER_BACKUP=YES"
 # Always run read-only D diagnostic before any upgrade (uses .venv; never swallows stderr).
 run_checkpoint_d_diagnostic
 
+# Fail-closed on 008 partial/inconsistent regardless of SKIP_MIGRATE
+if [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" == "YES" ]]; then
+  abort "refuse continue: MIGRATION_PARTIAL_OR_INCONSISTENT=YES (008 schema guard) — inspect 008 objects first"
+fi
+
 if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
-  section "CHECKPOINT D — APPLY 007"
+  section "CHECKPOINT D — APPLY 008"
   echo "ALEMBIC_CWD=${BACKEND}"
   echo "ALEMBIC_PYTHON=${VENV_PY}"
   echo "ALEMBIC_DATABASE_TARGET_PRE=$(echo "${DATABASE_URL}" | sed -E 's#^[^@]+@##; s#\?.*##')"
   echo "USING_SYSTEM_PYTHON3_M_ALEMBIC=NO"
 
+  [[ "${ALLOW_008_UPGRADE:-NO}" == "YES" ]] \
+    || abort "refuse upgrade: ALLOW_008_UPGRADE!=YES (SCHEMA_STATE=${SCHEMA_STATE:-UNKNOWN})"
+  [[ "${CLEAN_PRE_008:-NO}" == "YES" ]] \
+    || abort "refuse upgrade: CLEAN_PRE_008!=YES"
   [[ "${ALEMBIC_CURRENT}" == "${EXPECTED_BEFORE}" ]] \
     || abort "refuse upgrade: ALEMBIC_CURRENT=${ALEMBIC_CURRENT} != ${EXPECTED_BEFORE}"
   [[ "${DIRECT_DB_REVISION}" == "${EXPECTED_BEFORE}" ]] \
@@ -513,7 +558,7 @@ if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   [[ "${ALEMBIC_HEADS}" == "${EXPECTED_AFTER}" ]] \
     || abort "refuse upgrade: ALEMBIC_HEADS=${ALEMBIC_HEADS} != ${EXPECTED_AFTER}"
   [[ "${MIGRATION_PARTIAL_OR_INCONSISTENT:-NO}" != "YES" ]] \
-    || abort "refuse upgrade: MIGRATION_PARTIAL_OR_INCONSISTENT=YES — inspect schema first"
+    || abort "refuse upgrade: MIGRATION_PARTIAL_OR_INCONSISTENT=YES (008 schema guard) — inspect 008 objects first"
 
   MIGRATION_STARTED=YES
   echo "MIGRATION_STARTED=YES"
@@ -532,13 +577,13 @@ if [[ "${SKIP_MIGRATE}" != "YES" ]]; then
   echo "DB_REVISION_AFTER=${AFTER}"
   if [[ "${AFTER}" != "${EXPECTED_AFTER}" ]]; then
     report_migration_failure "rev_mismatch" /tmp/gq-p5-alembic-upgrade.err
-    abort "upgrade did not land on 007 (got ${AFTER})"
+    abort "upgrade did not land on 008 (got ${AFTER})"
   fi
   ROLLBACK_REQUIRED=NO
   echo "ROLLBACK_REQUIRED=NO"
   echo "MIGRATION=PASS"
 else
-  echo "MIGRATION=SKIPPED_ALREADY_007"
+  echo "MIGRATION=SKIPPED_ALREADY_008"
 fi
 
 section "CHECKPOINT E — SCHEMA VERIFY"
