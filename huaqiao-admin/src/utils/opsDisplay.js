@@ -5,11 +5,13 @@
 
 export const EMPTY = {
   pending: '待补充',
+  unset: '未设置',
   judge: '待判定',
   official: '待官方公布',
   unassigned: '未分配',
   none: '暂无记录',
   noTargets: '尚未添加目标大学',
+  name: '待补姓名',
 }
 
 const PLACEHOLDERS = new Set([

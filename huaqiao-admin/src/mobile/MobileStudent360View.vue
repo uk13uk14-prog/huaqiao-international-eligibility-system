@@ -5,11 +5,14 @@
       <h1>{{ displayName }}</h1>
       <p class="gq-muted">#{{ data.student_id }} · {{ human(owner.email) }}</p>
       <div class="ops-banner">
-        <div class="hi"><span class="k">负责人</span><span class="v">{{ human(crm.assignee_label || ops.assignee_label, EMPTY.unassigned) }}</span></div>
+        <div class="hi"><span class="k">姓名</span><span class="v">{{ displayName }}</span></div>
+        <div class="hi"><span class="k">Student ID</span><span class="v">{{ data.student_id }}</span></div>
+        <div class="hi"><span class="k">身份路线</span><span class="v">{{ human(crm.identity_track || identityRoute) }}</span></div>
         <div class="hi"><span class="k">阶段</span><span class="v">{{ human(crm.crm_stage_label || ops.crm_stage_label, EMPTY.unassigned) }}</span></div>
+        <div class="hi"><span class="k">负责人</span><span class="v">{{ human(crm.assignee_label || ops.assignee_label, EMPTY.unassigned) }}</span></div>
         <div class="hi"><span class="k">风险</span><span class="v"><el-tag size="small" :type="riskTagType(crm.risk_level)">{{ riskLabel(crm.risk_level) }}</el-tag></span></div>
-        <div class="hi"><span class="k">下一步</span><span class="v">{{ human(crm.next_action || ops.next_action) }}</span></div>
-        <div><span class="k">下次跟进</span><span class="v">{{ humanDateTime(crm.next_follow_up_at || ops.next_follow_up_at) }}</span></div>
+        <div class="hi"><span class="k">下一步</span><span class="v">{{ human(crm.next_action || ops.next_action, EMPTY.unset) }}</span></div>
+        <div class="hi"><span class="k">下次跟进</span><span class="v">{{ humanDateTime(crm.next_follow_up_at || ops.next_follow_up_at, EMPTY.unset) }}</span></div>
         <div><span class="k">套餐</span><span class="v">{{ planLabel }}</span></div>
       </div>
       <div class="quick">
@@ -249,9 +252,11 @@ const targetRows = computed(() => (Array.isArray(goals.value.targets) ? goals.va
 const timelineRows = computed(() => (Array.isArray(data.value?.timeline) ? data.value.timeline : []))
 const followRows = computed(() => (Array.isArray(data.value?.follow_ups) ? data.value.follow_ups : []))
 
-const displayName = computed(() =>
-  human(pick(ops.value.display_name, crm.value.display_name, meta.value.display_name, basic.value.chinese_name, basic.value.english_name), '待补姓名'),
-)
+const displayName = computed(() => {
+  const raw = pick(ops.value.display_name, crm.value.display_name, meta.value.display_name, basic.value.chinese_name, basic.value.english_name)
+  if (!raw || String(raw).includes('@')) return EMPTY.name
+  return human(raw, EMPTY.name)
+})
 const planLabel = computed(() => {
   const code = owner.value.plan_code
   if (!code) return EMPTY.pending
