@@ -1,5 +1,7 @@
 <template>
-  <div :class="['mobile-app', darkMode ? 'dark' : 'light']">
+  <div v-if="!authReady" class="auth-boot">正在恢复登录状态…</div>
+  <AuthGate v-else-if="!saasUser" :dark-mode="darkMode" @authenticated="onAuthSuccess" />
+  <div v-else :class="['mobile-app', darkMode ? 'dark' : 'light']">
     <van-nav-bar
       :title="navTitle"
       fixed
@@ -251,27 +253,54 @@
       </section>
 
       <section v-if="tab === 'universities'" class="list-screen">
-        <van-dropdown-menu>
-          <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChange" />
-          <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="featureFilter" :options="featureOptions" @change="loadUniversities" />
-        </van-dropdown-menu>
-        <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
-        <div class="card-list">
-          <van-empty v-if="!universities.length" description="暂无院校数据，可调整筛选或稍后重试" />
-          <article v-for="school in universities" :key="school.id" class="school-card">
-            <div class="school-title"><b>#{{ school.ranking }} {{ school.name }}</b><van-tag>{{ school.province }}</van-tag></div>
-            <p>{{ formatTags(school) }}</p>
-            <p><b>领域：</b>{{ school.fields }}</p>
-            <p><b>优势专业：</b>{{ school.advantage_majors }}</p>
-            <p>{{ school.description }}</p>
-            <p><b>招生办：</b>{{ school.admissions_office || '以学校官方发布为准' }}</p>
-            <p><b>邮箱：</b>{{ school.admission_email || '以学校官方发布为准' }}</p>
-            <p><b>电话：</b>{{ school.admission_phone || '以学校官方发布为准' }}</p>
-            <van-button size="small" type="primary" plain :url="school.admission_url || school.official_url">招生官网</van-button>
-          </article>
+        <div class="univ-toolbar">
+          <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
+          <div class="univ-chips" role="toolbar" aria-label="院校筛选与排序">
+            <button type="button" class="univ-chip" :class="{ active: targetFilter === 'international' }" @click="setUnivTarget('international')">国际生</button>
+            <button type="button" class="univ-chip" :class="{ active: targetFilter === 'huaqiao' }" @click="setUnivTarget('huaqiao')">华侨生</button>
+            <button
+              v-for="opt in univSortOptions"
+              :key="opt.value"
+              type="button"
+              class="univ-chip"
+              :class="{ active: univSort === opt.value }"
+              @click="setUnivSort(opt.value)"
+            >{{ opt.text }}</button>
+            <button type="button" class="univ-chip" :class="{ active: !!tagFilter }" @click="cycleUnivTag">层次{{ tagFilter ? '·'+tagFilter : '' }}</button>
+            <button type="button" class="univ-chip" :class="{ active: !!provinceFilter }" @click="cycleUnivProvince">地区{{ provinceFilter ? '·'+provinceFilter : '' }}</button>
+            <button type="button" class="univ-chip" :class="{ active: !!univFieldFilter }" @click="cycleUnivField">专业{{ univFieldFilter ? '·'+univFieldFilter : '' }}</button>
+          </div>
+          <p class="univ-count">显示 {{ browsedUniversities.length }} / API {{ universities.length }} 所</p>
+          <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
+        </div>
+        <div class="univ-layout">
+          <div class="univ-list">
+            <van-empty v-if="!browsedUniversities.length" description="暂无匹配院校，可调整搜索或筛选" />
+            <article
+              v-for="school in browsedUniversities"
+              :key="school.id"
+              :data-az="pinyinInitial(school.name)"
+              class="univ-card"
+            >
+              <div class="univ-card-head">
+                <b>#{{ school.ranking }} {{ school.name }}</b>
+                <van-tag plain type="primary">{{ school.province }}</van-tag>
+              </div>
+              <p class="univ-card-meta">{{ formatTags(school) }} · {{ school.fields || '综合' }}</p>
+              <p class="univ-card-majors"><b>优势专业：</b>{{ school.advantage_majors || '—' }}</p>
+              <van-button size="mini" plain type="primary" @click="toggleUnivExpand(school.id)">{{ expandedUnivIds[school.id] ? '收起详情' : '查看详情' }}</van-button>
+              <div v-if="expandedUnivIds[school.id]" class="univ-card-detail">
+                <p>{{ school.description || '暂无简介' }}</p>
+                <p><b>招生办：</b>{{ school.admissions_office || '以学校官方发布为准' }}</p>
+                <p><b>邮箱：</b>{{ school.admission_email || '以学校官方发布为准' }}</p>
+                <p><b>电话：</b>{{ school.admission_phone || '以学校官方发布为准' }}</p>
+                <van-button size="small" type="primary" plain :url="school.admission_url || school.official_url">招生官网</van-button>
+              </div>
+            </article>
+          </div>
+          <nav v-if="univSort === 'az' && univAzLetters.length" class="univ-az" aria-label="拼音首字母索引">
+            <button v-for="letter in univAzLetters" :key="letter" type="button" @click="scrollUnivLetter(letter)">{{ letter }}</button>
+          </nav>
         </div>
       </section>
 
@@ -318,9 +347,12 @@
           </div>
         </van-cell-group>
         <van-cell-group v-else inset :title="'您好，' + (saasUser.name || saasUser.email)">
+          <van-cell title="姓名" :value="saasUser.name || '—'" />
+          <van-cell title="邮箱" :value="saasUser.email || '—'" />
           <van-cell title="当前套餐" :value="saasUser.plan_code + (saasUser.paid ? '（在期）' : '')" />
-          <van-cell v-if="saasUser.trial_active" title="Pro 体验" :value="'剩余 ' + (saasUser.trial_days_remaining ?? '—') + ' 天'" />
+          <van-cell v-if="saasUser.trial_active" title="7天 Pro 试用中" :value="'剩余 ' + (saasUser.trial_days_remaining ?? '—') + ' 天'" />
           <van-cell v-else-if="saasUser.trial_status === 'EXPIRED'" title="体验状态" value="已结束 · 数据已保留" />
+          <van-cell v-if="saasUser.membership_until" title="到期时间" :value="String(saasUser.membership_until).slice(0, 19).replace('T', ' ')" />
           <van-cell title="全量院校库" :value="saasUser.features?.full_elite_university_library ? '已开通' : '未开通'" />
           <van-cell title="专家咨询" :value="saasUser.features?.one_on_one_expert ? '已开通' : '未开通'" />
           <van-cell title="智能时间轴" :value="saasUser.features?.full_timeline_reminders ? '已开通' : '年/三年会员'" />
@@ -489,6 +521,9 @@ import {
 } from './activeStudent'
 import { api } from './api'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
+import AuthGate from './AuthGate.vue'
+import { normalizeSaasUser } from './authSession.js'
+import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 
 const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
@@ -542,10 +577,27 @@ const consultSubmitting = ref(false)
 const APP_VERSION = '1.0.0'
 
 const saasUser = ref(null)
+const authReady = ref(false)
 const loginEmail = ref('')
 const loginPassword = ref('')
 const saasBusy = ref(false)
+const univSearch = ref('')
+const univSort = ref('recommend')
+const univSortOptions = SORT_OPTIONS
+const expandedUnivIds = ref({})
+const univBrowseTick = ref(0)
 const redeemCode = ref('')
+
+const browsedUniversities = computed(() => {
+  univBrowseTick.value // dependency
+  const { items } = browseUniversities(universities.value, { query: univSearch.value, sort: univSort.value })
+  return items
+})
+const univAzLetters = computed(() => {
+  univBrowseTick.value
+  const { letters } = browseUniversities(universities.value, { query: univSearch.value, sort: univSort.value })
+  return letters
+})
 
 /** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
 const trialBannerText = computed(() => {
@@ -588,7 +640,7 @@ async function doSaasRegister() {
       name: loginEmail.value.split('@')[0] || '用户',
     })
     setSaasToken(r.token)
-    saasUser.value = r.user
+    saasUser.value = normalizeSaasUser(r.user)
     showSuccessToast('已开启 7 天 Pro 完整体验')
     await refreshStudentSwitcher()
     await loadUniversities()
@@ -893,11 +945,65 @@ async function refreshSaasUser() {
     return
   }
   try {
-    saasUser.value = await saasApi.me()
-  } catch {
-    setSaasToken('')
+    saasUser.value = normalizeSaasUser(await saasApi.me())
+  } catch (error) {
+    if (error && error.status === 401) {
+      setSaasToken('')
+      saasUser.value = null
+      return
+    }
+    // Network blip: keep token; leave saasUser null so gate can show after explicit logout only if needed
+    // Keep session token so a retry can restore.
     saasUser.value = null
   }
+}
+
+async function onAuthSuccess(user) {
+  saasUser.value = normalizeSaasUser(user)
+  authReady.value = true
+  tab.value = 'home'
+  historyStack.value = ['home']
+  await refreshStudentSwitcher()
+  await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+  if (saasUser.value?.trial_active) {
+    showSuccessToast(`7天 Pro 试用中 · 剩余 ${saasUser.value.trial_days_remaining ?? '—'} 天`)
+  }
+}
+
+function onUnivBrowseChange() {
+  univBrowseTick.value += 1
+}
+function setUnivSort(v) {
+  univSort.value = v
+  onUnivBrowseChange()
+}
+function setUnivTarget(v) {
+  targetFilter.value = v
+  loadUniversities()
+}
+function cycleFromOptions(current, options, key = 'value') {
+  const vals = options.map((o) => o[key])
+  const idx = vals.indexOf(current)
+  return vals[(idx + 1) % vals.length]
+}
+function cycleUnivTag() {
+  tagFilter.value = cycleFromOptions(tagFilter.value, tagOptions)
+  loadUniversities()
+}
+function cycleUnivProvince() {
+  provinceFilter.value = cycleFromOptions(provinceFilter.value, provinceOptions)
+  loadUniversities()
+}
+function cycleUnivField() {
+  univFieldFilter.value = cycleFromOptions(univFieldFilter.value, univFieldOptions)
+  loadUniversities()
+}
+function toggleUnivExpand(id) {
+  expandedUnivIds.value = { ...expandedUnivIds.value, [id]: !expandedUnivIds.value[id] }
+}
+function scrollUnivLetter(letter) {
+  const el = document.querySelector(`.univ-card[data-az="${letter}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 async function doSaasLogin() {
@@ -905,7 +1011,7 @@ async function doSaasLogin() {
   try {
     const r = await saasApi.login(loginEmail.value, loginPassword.value)
     setSaasToken(r.token)
-    saasUser.value = r.user
+    saasUser.value = normalizeSaasUser(r.user)
     showSuccessToast('登录成功')
     await refreshStudentSwitcher()
     await loadVaultFromSources()
@@ -930,6 +1036,12 @@ function doSaasLogout() {
   publishedPlanDetail.value = null
   publishedPlanShow.value = false
   reminderList.value = []
+  notifItems.value = []
+  notifUnread.value = 0
+  universities.value = []
+  tab.value = 'home'
+  historyStack.value = ['home']
+  showSuccessToast('已退出登录')
 }
 
 async function buySaasPlan(plan_code) {
@@ -968,7 +1080,7 @@ async function doRedeem() {
   saasBusy.value = true
   try {
     const r = await saasApi.redeem(redeemCode.value.trim())
-    if (r.user) saasUser.value = r.user
+    if (r.user) saasUser.value = normalizeSaasUser(r.user)
     else await refreshSaasUser()
     showSuccessToast(r.message || '兑换成功')
     redeemCode.value = ''
@@ -1341,8 +1453,14 @@ onMounted(async () => {
     app_version: APP_VERSION,
     platform: detectPlatform(),
   })
-  await refreshSaasUser()
-  await refreshStudentSwitcher()
-  await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+  try {
+    await refreshSaasUser()
+    if (saasUser.value) {
+      await refreshStudentSwitcher()
+      await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+    }
+  } finally {
+    authReady.value = true
+  }
 })
 </script>

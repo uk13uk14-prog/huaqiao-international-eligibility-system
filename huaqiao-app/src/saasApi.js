@@ -29,7 +29,11 @@ async function saasRequest(path, options = {}) {
       err.detail = detail
       throw err
     } catch (e) {
-      if (e instanceof SyntaxError) throw new Error(text || `SaaS请求失败：${response.status}`)
+      if (e instanceof SyntaxError) {
+        const err = new Error(text || `SaaS请求失败：${response.status}`)
+        err.status = response.status
+        throw err
+      }
       throw e
     }
   }
