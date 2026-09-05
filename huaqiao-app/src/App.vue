@@ -260,26 +260,43 @@
       <section v-if="tab === 'universities'" class="list-screen">
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
-          <div class="univ-chips" role="toolbar" aria-label="院校筛选与排序">
-            <button type="button" class="univ-chip" :class="{ active: targetFilter === 'international' }" @click="setUnivTarget('international')">国际生</button>
-            <button type="button" class="univ-chip" :class="{ active: targetFilter === 'huaqiao' }" @click="setUnivTarget('huaqiao')">华侨生</button>
-            <button
-              v-for="opt in univSortOptions"
-              :key="opt.value"
-              type="button"
-              class="univ-chip"
-              :class="{ active: univSort === opt.value }"
-              @click="setUnivSort(opt.value)"
-            >{{ opt.text }}</button>
-            <button type="button" class="univ-chip" :class="{ active: !!tagFilter }" @click="cycleUnivTag">层次{{ tagFilter ? '·'+tagFilter : '' }}</button>
-            <button type="button" class="univ-chip" :class="{ active: !!provinceFilter }" @click="cycleUnivProvince">地区{{ provinceFilter ? '·'+provinceFilter : '' }}</button>
-            <button type="button" class="univ-chip" :class="{ active: !!univFieldFilter }" @click="cycleUnivField">专业{{ univFieldFilter ? '·'+univFieldFilter : '' }}</button>
+          <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
+            <div class="mf-cell">
+              <span class="mf-label">身份</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">排序</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="univSort" :options="univSortMenuOptions" @change="onUnivBrowseChange" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">地区</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">院校类型</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell mf-cell-wide">
+              <span class="mf-label">专业</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
           </div>
           <p class="univ-count">显示 {{ browsedUniversities.length }} / API {{ universities.length }} 所</p>
           <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
         </div>
         <div class="univ-layout">
-          <div class="univ-list">
+          <div ref="univListEl" class="univ-list" @scroll.passive="onUnivListScroll">
             <van-empty v-if="!browsedUniversities.length" description="暂无匹配院校，可调整搜索或筛选" />
             <article
               v-for="school in browsedUniversities"
@@ -303,21 +320,58 @@
               </div>
             </article>
           </div>
-          <nav v-if="univSort === 'az' && univAzLetters.length" class="univ-az" aria-label="拼音首字母索引">
-            <button v-for="letter in univAzLetters" :key="letter" type="button" @click="scrollUnivLetter(letter)">{{ letter }}</button>
+          <nav
+            class="univ-az"
+            :class="{ 'is-active': azIndexActive }"
+            aria-label="拼音首字母索引"
+            @touchstart.passive="pulseAzIndex"
+          >
+            <button
+              v-for="letter in azIndexLetters"
+              :key="letter"
+              type="button"
+              class="univ-az-btn"
+              :class="{ 'is-empty': !univAzPresent.has(letter) }"
+              @click="onAzLetterClick(letter)"
+            >{{ letter }}</button>
           </nav>
         </div>
       </section>
 
       <section v-if="tab === 'schedule'" class="list-screen">
         <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
-        <van-dropdown-menu>
-          <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
-          <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
-        </van-dropdown-menu>
+        <div class="mf-grid mf-grid-schedule" role="toolbar" aria-label="招生时间轴筛选">
+          <div class="mf-cell">
+            <span class="mf-label">身份</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">月份</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">地区</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">层级</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell mf-cell-wide">
+            <span class="mf-label">特色</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+        </div>
         <van-empty v-if="!schedules.length" description="暂无招生时间轴数据，可调整筛选或稍后重试" />
         <div v-else class="card-list">
           <article v-for="item in schedules" :key="item.id || `${item.university_name}-${item.year}-${item.month}`" class="school-card">
@@ -590,6 +644,13 @@ const saasBusy = ref(false)
 const univSearch = ref('')
 const univSort = ref('recommend')
 const univSortOptions = SORT_OPTIONS
+/** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
+const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
+const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
+const azIndexLetters = AZ_INDEX_LETTERS
+const azIndexActive = ref(false)
+const univListEl = ref(null)
+let azFadeTimer = null
 const expandedUnivIds = ref({})
 const univBrowseTick = ref(0)
 const redeemCode = ref('')
@@ -604,6 +665,8 @@ const univAzLetters = computed(() => {
   const { letters } = browseUniversities(universities.value, { query: univSearch.value, sort: univSort.value })
   return letters
 })
+const univAzPresent = computed(() => new Set(univAzLetters.value))
+watch(univSort, () => { ensureUnivSortMenuValue() })
 
 /** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
 const trialBannerText = computed(() => {
@@ -984,6 +1047,10 @@ function setUnivSort(v) {
   univSort.value = v
   onUnivBrowseChange()
 }
+function ensureUnivSortMenuValue() {
+  const ok = univSortMenuOptions.some((o) => o.value === univSort.value)
+  if (!ok) univSort.value = 'recommend'
+}
 function setUnivTarget(v) {
   targetFilter.value = v
   loadUniversities()
@@ -1011,6 +1078,22 @@ function toggleUnivExpand(id) {
 function scrollUnivLetter(letter) {
   const el = document.querySelector(`.univ-card[data-az="${letter}"]`)
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+function pulseAzIndex() {
+  azIndexActive.value = true
+  if (azFadeTimer) clearTimeout(azFadeTimer)
+  azFadeTimer = setTimeout(() => { azIndexActive.value = false }, 1200)
+}
+function onAzLetterClick(letter) {
+  pulseAzIndex()
+  if (!univAzPresent.value.has(letter)) return
+  scrollUnivLetter(letter)
+}
+function onUnivListScroll() {
+  pulseAzIndex()
+}
+function onUnivTargetDropdown() {
+  setUnivTarget(targetFilter.value)
 }
 
 async function doSaasLogin() {
