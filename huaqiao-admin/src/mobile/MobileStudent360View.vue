@@ -2,8 +2,20 @@
   <div v-if="data" class="m-page">
     <header class="m-hd">
       <button type="button" class="back" @click="$router.back()">‹ 返回</button>
-      <h1>{{ data.meta?.display_name || `学生 #${data.student_id}` }}</h1>
+      <h1>{{ data.ops_header?.display_name || data.meta?.display_name || `学生 #${data.student_id}` }}</h1>
       <p class="gq-muted">#{{ data.student_id }} · {{ data.owner?.email || '—' }}</p>
+      <div class="ops-banner">
+        <div>负责人：{{ data.ops_header?.assignee_label || data.crm?.assignee_label || '未分配' }}</div>
+        <div>阶段：{{ data.ops_header?.crm_stage_label || data.crm?.crm_stage_label || '—' }}</div>
+        <div>下一步：{{ data.ops_header?.next_action || data.crm?.next_action || '—' }}</div>
+        <div>跟进：{{ data.ops_header?.next_follow_up_at || data.crm?.next_follow_up_at || '—' }}</div>
+      </div>
+      <div class="quick">
+        <button type="button" @click="tab='follow'">记跟进</button>
+        <button type="button" @click="$router.push(`/m/ai/${studentId}`)">AI建议</button>
+        <button type="button" @click="tab='timeline'">时间线</button>
+        <button type="button" @click="tab='consult'">专家规划</button>
+      </div>
     </header>
 
     <el-tabs v-model="tab" class="tabs">
@@ -132,4 +144,10 @@ onMounted(async () => {
   white-space: pre-wrap; font-size: 12px; background: #0f172a; color: #e2e8f0;
   padding: 10px; border-radius: 8px; overflow: auto; max-height: 240px;
 }
+</style>
+
+<style scoped>
+.ops-banner{background:#eff6ff;border-radius:10px;padding:10px;margin:8px 0;font-size:13px;display:grid;gap:4px}
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px}
+.quick button{border:1px solid #cbd5e1;border-radius:10px;padding:10px;background:#fff}
 </style>

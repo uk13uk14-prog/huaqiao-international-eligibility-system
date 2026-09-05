@@ -2,7 +2,24 @@
   <div v-if="data">
     <div class="gq-grid-2">
       <div>
-        <h1 class="page-title">Student 360 · #{{ data.student_id }}</h1>
+        <h1 class="page-title">Student 360 · {{ data.ops_header?.display_name || data.meta?.display_name || ('#' + data.student_id) }}</h1>
+        <div class="ops-banner" v-if="data.crm || data.ops_header">
+          <div><b>负责人</b>：{{ data.ops_header?.assignee_label || data.crm?.assignee_label || '未分配' }}</div>
+          <div><b>阶段</b>：{{ data.ops_header?.crm_stage_label || data.crm?.crm_stage_label || '—' }}</div>
+          <div><b>下一步</b>：{{ data.ops_header?.next_action || data.crm?.next_action || '—' }}</div>
+          <div><b>下次跟进</b>：{{ data.ops_header?.next_follow_up_at || data.crm?.next_follow_up_at || '—' }}</div>
+        </div>
+        <div class="ops-actions">
+          <el-select v-model="assignTo" clearable placeholder="分配负责人" style="width:180px">
+            <el-option label="未分配" :value="0" />
+            <el-option v-for="s in staff" :key="s.id" :label="s.label" :value="s.id" />
+          </el-select>
+          <el-button size="small" type="primary" @click="doAssign">分配负责人</el-button>
+          <el-select v-model="stageEdit" placeholder="阶段" style="width:140px">
+            <el-option v-for="(label, key) in stageLabels" :key="key" :label="label" :value="key" />
+          </el-select>
+          <el-button size="small" @click="saveStage">更新阶段</el-button>
+        </div>
         <p class="page-sub gq-muted">
           {{ data.meta?.display_name }} · 所属用户 {{ data.owner?.email }} · student_id={{ data.student_id }}
         </p>
@@ -130,6 +147,33 @@
     </div>
 
     <section class="gq-panel" style="margin-top:16px">
+      <h3>跟进记录</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <el-input v-model="followContent" type="textarea" :rows="2" placeholder="人工跟进内容" style="flex:1;min-width:240px" />
+        <el-input v-model="followNext" placeholder="下一步" style="width:200px" />
+        <el-button type="primary" @click="saveFollowUp">记跟进</el-button>
+        <el-button @click="loadAiDrafts">AI建议(草稿)</el-button>
+      </div>
+      <el-alert v-if="aiDrafts.length" type="info" :closable="false" title="AI 建议仅草稿，不会自动发送" style="margin-bottom:8px" />
+      <el-table :data="aiDrafts" size="small" v-if="aiDrafts.length" style="margin-bottom:8px">
+        <el-table-column prop="action" label="动作" width="140" />
+        <el-table-column prop="content" label="草稿内容" />
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="acceptAiDraft(row)">确认为跟进</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-table :data="data.follow_ups || []" size="small">
+        <el-table-column prop="created_at" label="时间" width="170" />
+        <el-table-column prop="operator_label" label="操作人" width="120" />
+        <el-table-column prop="source" label="来源" width="110" />
+        <el-table-column prop="content" label="内容" />
+        <el-table-column prop="next_action" label="下一步" width="160" />
+      </el-table>
+    </section>
+
+    <section class="gq-panel" style="margin-top:16px">
       <h3>Consultation History</h3>
       <el-table :data="history" size="small" @row-click="selectDraft" style="cursor:pointer">
         <el-table-column prop="id" label="ID" width="70" />
@@ -236,11 +280,67 @@ async function saveCsca() {
   }
 }
 
+const staff = ref([])
+const assignTo = ref()
+const stageEdit = ref('')
+const stageLabels = ref({})
+const followContent = ref('')
+const followNext = ref('')
+const aiDrafts = ref([])
+
+async function doAssign() {
+  const id = assignTo.value === 0 ? null : assignTo.value
+  await api.assignStudent(props.studentId, id)
+  ElMessage.success('负责人已更新')
+  await load()
+}
+async function saveStage() {
+  if (!stageEdit.value) return
+  await api.patchStudentCrm(props.studentId, { crm_stage: stageEdit.value })
+  ElMessage.success('阶段已更新')
+  await load()
+}
+async function saveFollowUp() {
+  if (!followContent.value.trim()) return
+  await api.createFollowUp(props.studentId, {
+    content: followContent.value,
+    next_action: followNext.value || null,
+    source: 'HUMAN',
+  })
+  followContent.value = ''
+  followNext.value = ''
+  ElMessage.success('跟进已保存')
+  await load()
+}
+async function loadAiDrafts() {
+  const r = await api.aiFollowUpDrafts(props.studentId)
+  aiDrafts.value = r.drafts || []
+}
+async function acceptAiDraft(row) {
+  await api.createFollowUp(props.studentId, {
+    content: row.content,
+    summary: row.action,
+    source: 'AI_ASSISTED',
+    type: 'AI_SUGGESTION',
+  })
+  ElMessage.success('已保存为 AI_ASSISTED 跟进（未自动发送）')
+  aiDrafts.value = []
+  await load()
+}
+
 async function load() {
   data.value = await api.student360(props.studentId)
   kinds.value = data.value.report_kinds || {}
+  stageEdit.value = data.value.crm?.crm_stage || ''
+  stageLabels.value = data.value.crm_stage_labels || {
+    UNASSIGNED:'未分配', NEW:'新学生', CONTACTED:'已联系', PLANNING:'规划中',
+    WAITING_STUDENT:'等待学生', WAITING_DOCUMENTS:'等待材料', APPLICATION:'申请中',
+    FOLLOW_UP:'持续跟进', COMPLETED:'已完成', PAUSED:'暂停'
+  }
+  assignTo.value = data.value.crm?.assignee_user_id || 0
   syncCscaFormFromData()
   await refreshDrafts()
+  try { staff.value = (await api.staff()).staff || [] } catch { staff.value = [] }
 }
 
 async function refreshDrafts() {
@@ -315,4 +415,10 @@ watch(() => props.studentId, load)
   overflow: auto;
 }
 .flow { font-size: 12px; margin-top: 4px; }
+</style>
+
+<style scoped>
+.ops-banner{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;margin:8px 0 12px;font-size:14px}
+.ops-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+@media(max-width:900px){.ops-banner{grid-template-columns:1fr 1fr}}
 </style>

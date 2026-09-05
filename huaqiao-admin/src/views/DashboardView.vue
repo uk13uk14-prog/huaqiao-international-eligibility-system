@@ -36,6 +36,12 @@ const stats = computed(() => {
     { label: 'Trial 即将到期', value: d.trial_expiring_soon ?? '—' },
     { label: '学生档案', value: d.student_profiles ?? '—' },
     { label: '待人工审核', value: d.pending_human_review ?? '—' },
+    { label: '未分配学生', value: d.crm_todos?.counts?.unassigned ?? '—' },
+    { label: '今日需跟进', value: d.crm_todos?.counts?.due_today ?? '—' },
+    { label: '逾期跟进', value: d.crm_todos?.counts?.overdue ?? '—' },
+    { label: '高风险学生', value: d.crm_todos?.counts?.high_risk ?? '—' },
+    { label: '等待材料', value: d.crm_todos?.counts?.waiting_documents ?? '—' },
+    { label: 'AI待审核', value: d.crm_todos?.counts?.ai_pending_review ?? '—' },
   ]
 })
 </script>

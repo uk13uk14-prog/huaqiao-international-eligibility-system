@@ -33,6 +33,7 @@ from .services.admin_rbac import (
 from .services.membership_trial import is_trial_plan, trial_info
 from .services.security import is_paid
 from .services.student_profile import empty_profile, normalize_profile, profile_summary
+from .services import student_crm as crm
 from .services.student_timeline import serialize_item
 from .services.vault_crypto import decrypt_profile_json
 
@@ -53,6 +54,7 @@ ADMIN_V1_CONTRACT = [
     "PATCH /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}",
     "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/approve",
     "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/publish",
+    "GET /api/admin/v1/staff",
 ]
 
 
@@ -318,6 +320,7 @@ def dashboard(admin: User = Depends(require_capability("admin.dashboard")), db: 
             for r in recent
         ],
         "bi": "simple_v1",
+        "crm_todos": crm.dashboard_crm_todos(db),
     }
 
 
@@ -368,40 +371,105 @@ def get_user(
 @router.get("/students")
 def list_students(
     q: str | None = Query(None),
+    assignee_user_id: int | None = Query(None),
+    crm_stage: str | None = Query(None),
+    risk_level: str | None = Query(None),
+    identity_track: str | None = Query(None),
+    plan: str | None = Query(None, description="trial|paid|any"),
+    entry_year: str | None = Query(None),
+    sort: str = Query("updated_at", description="updated_at|last_follow_up|next_follow_up|created_at"),
     admin: User = Depends(require_capability("admin.students.read")),
     db: Session = Depends(get_db),
 ):
-    rows = (
-        db.query(StudentMasterProfile)
-        .filter(StudentMasterProfile.status != "DELETED")
-        .order_by(StudentMasterProfile.updated_at.desc())
-        .limit(500)
-        .all()
-    )
+    """Student CRM list V2 — operational columns; never returns cipher_blob."""
+    query = db.query(StudentMasterProfile).filter(StudentMasterProfile.status != "DELETED")
+    if assignee_user_id is not None:
+        if assignee_user_id == 0:
+            query = query.filter(StudentMasterProfile.assignee_user_id.is_(None))
+        else:
+            query = query.filter(StudentMasterProfile.assignee_user_id == assignee_user_id)
+    if crm_stage:
+        query = query.filter(StudentMasterProfile.crm_stage == crm_stage.upper())
+    if risk_level:
+        query = query.filter(StudentMasterProfile.risk_level == risk_level.upper())
+    if identity_track:
+        query = query.filter(StudentMasterProfile.identity_track == identity_track)
+
+    sort_key = (sort or "updated_at").lower()
+    if sort_key == "last_follow_up":
+        query = query.order_by(StudentMasterProfile.last_follow_up_at.is_(None), StudentMasterProfile.last_follow_up_at.desc())
+    elif sort_key == "next_follow_up":
+        query = query.order_by(StudentMasterProfile.next_follow_up_at.is_(None), StudentMasterProfile.next_follow_up_at.asc())
+    elif sort_key == "created_at":
+        query = query.order_by(StudentMasterProfile.created_at.desc())
+    else:
+        query = query.order_by(StudentMasterProfile.updated_at.desc())
+
+    rows = query.limit(500).all()
     items = []
     for s in rows:
         owner = db.query(User).filter(User.id == s.user_id).first()
         meta = public_student_meta(s)
         meta["owner"] = {"id": owner.id, "email": owner.email, "name": owner.name} if owner else None
+        if owner:
+            from .services.membership_trial import trial_info as _trial_info
+            from .services.security import is_paid as _is_paid
+            t = _trial_info(owner)
+            meta["owner_plan"] = {
+                "plan_code": owner.plan_code,
+                "is_paid": _is_paid(owner),
+                "trial_active": bool(t.get("trial_active")),
+            }
+        else:
+            meta["owner_plan"] = {}
         try:
             prof = _decrypt_student_profile(s)
+            # Soft-heal display_name when cipher already has a real name
             summary = profile_summary(prof)
             targets = summary.get("target_universities") or []
             meta["goal_hint"] = "、".join([t for t in targets if t][:3])
             meta["summary"] = {
                 "chinese_name": summary.get("chinese_name") or "",
                 "intended_entry_year": summary.get("intended_entry_year") or "",
+                "international_status": summary.get("international_status") or "",
+                "huaqiao_status": summary.get("huaqiao_status") or "",
             }
+            snap = crm.crm_snapshot(db, s, prof)
         except HTTPException:
             meta["goal_hint"] = ""
             meta["summary"] = {}
+            snap = crm.crm_snapshot(db, s, None)
+
+        meta["display_name"] = snap["display_name"]
+        meta["display_name_needs_repair"] = snap["display_name_needs_repair"]
+        meta["crm"] = snap
+        meta["assignee_label"] = snap["assignee_label"]
+        meta["crm_stage"] = snap["crm_stage"]
+        meta["crm_stage_label"] = snap["crm_stage_label"]
+        meta["risk_level"] = snap["risk_level"]
+        meta["next_action"] = snap["next_action"]
+        meta["next_follow_up_at"] = snap["next_follow_up_at"]
+        meta["last_follow_up_at"] = snap["last_follow_up_at"]
+        meta["identity_track"] = snap["identity_track"]
+        meta["target_universities"] = snap["target_universities"]
+        meta["intended_entry_year"] = snap["intended_entry_year"]
+
+        if entry_year and str(snap.get("intended_entry_year") or "") != str(entry_year):
+            continue
+        if plan == "trial" and not (meta.get("owner_plan") or {}).get("trial_active"):
+            continue
+        if plan == "paid" and not (meta.get("owner_plan") or {}).get("is_paid"):
+            continue
         if q:
             ql = q.lower()
-            blob = f"{meta.get('display_name')}{meta.get('summary')}{owner.email if owner else ''}{s.id}".lower()
+            blob = f"{meta.get('display_name')}{meta.get('summary')}{owner.email if owner else ''}{s.id}{snap.get('assignee_label')}".lower()
             if ql not in blob:
                 continue
+        # Privacy: never include cipher / docs
+        assert "cipher_blob" not in meta
         items.append(meta)
-    return {"students": items, "count": len(items)}
+    return {"students": items, "count": len(items), "crm_stages": list(crm.CRM_STAGES), "stage_labels": crm.CRM_STAGE_LABELS_ZH}
+
 
 
 @router.get("/students/{student_id}")
@@ -449,6 +517,16 @@ def student_360(
         "eligibility": eligibility,
         "timeline": timeline,
         "consultations": consultations,
+        "crm": (_crm := crm.crm_snapshot(db, row, raw)),
+        "crm_stage_labels": crm.CRM_STAGE_LABELS_ZH,
+        "follow_ups": crm.list_follow_ups(db, student_id, limit=30),
+        "ops_header": {
+            "assignee_label": _crm.get("assignee_label"),
+            "crm_stage_label": _crm.get("crm_stage_label"),
+            "next_action": _crm.get("next_action"),
+            "next_follow_up_at": _crm.get("next_follow_up_at"),
+            "display_name": _crm.get("display_name"),
+        },
         "consultant_notes": {
             "placeholder": True,
             "notes": [],
@@ -762,3 +840,128 @@ def update_student_csca(
         "fake_date_allowed": False,
     }
 
+
+# ---------------------------------------------------------------------------
+# Student CRM V1
+# ---------------------------------------------------------------------------
+
+class AssignStudentIn(BaseModel):
+    assignee_user_id: int | None = None
+
+
+class CrmPatchIn(BaseModel):
+    crm_stage: str | None = None
+    risk_level: str | None = None
+    next_action: str | None = None
+    next_follow_up_at: str | None = None
+    identity_track: str | None = None
+    display_name: str | None = None
+
+
+class FollowUpCreateIn(BaseModel):
+    content: str = Field(..., min_length=1)
+    summary: str = ""
+    type: str = "NOTE"
+    source: str = "HUMAN"
+    next_action: str | None = None
+    next_follow_up_at: str | None = None
+
+
+@router.get("/staff")
+def list_staff(admin: User = Depends(require_capability("admin.students.read")), db: Session = Depends(get_db)):
+    return {"staff": crm.list_staff_candidates(db)}
+
+
+
+@router.post("/students/{student_id}/assign")
+def assign_student_endpoint(
+    student_id: int,
+    payload: AssignStudentIn,
+    admin: User = Depends(require_capability("admin.student360.write")),
+    db: Session = Depends(get_db),
+):
+    row = _get_student_or_404(db, student_id)
+    try:
+        snap = crm.assign_student(db, row=row, assignee_user_id=payload.assignee_user_id, operator=admin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"student_id": student_id, "crm": snap}
+
+
+@router.patch("/students/{student_id}/crm")
+def patch_student_crm(
+    student_id: int,
+    payload: CrmPatchIn,
+    admin: User = Depends(require_capability("admin.student360.write")),
+    db: Session = Depends(get_db),
+):
+    row = _get_student_or_404(db, student_id)
+    try:
+        snap = crm.patch_crm_fields(
+            db,
+            row=row,
+            operator=admin,
+            crm_stage=payload.crm_stage,
+            risk_level=payload.risk_level,
+            next_action=payload.next_action,
+            next_follow_up_at=payload.next_follow_up_at if payload.next_follow_up_at is not None else ...,
+            identity_track=payload.identity_track,
+            display_name_override=payload.display_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"student_id": student_id, "crm": snap}
+
+
+@router.get("/students/{student_id}/follow-ups")
+def get_follow_ups(
+    student_id: int,
+    admin: User = Depends(require_capability("admin.student360.read")),
+    db: Session = Depends(get_db),
+):
+    _get_student_or_404(db, student_id)
+    return {"student_id": student_id, "follow_ups": crm.list_follow_ups(db, student_id)}
+
+
+@router.post("/students/{student_id}/follow-ups")
+def post_follow_up(
+    student_id: int,
+    payload: FollowUpCreateIn,
+    admin: User = Depends(require_capability("admin.student360.write")),
+    db: Session = Depends(get_db),
+):
+    row = _get_student_or_404(db, student_id)
+    nxt = None
+    if payload.next_follow_up_at:
+        nxt = datetime.fromisoformat(payload.next_follow_up_at.replace("Z", ""))
+    try:
+        item = crm.create_follow_up(
+            db,
+            row=row,
+            operator=admin,
+            content=payload.content,
+            summary=payload.summary,
+            type_=payload.type,
+            source=payload.source,
+            next_action=payload.next_action,
+            next_follow_up_at=nxt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"student_id": student_id, "follow_up": item, "crm": crm.crm_snapshot(db, row)}
+
+
+@router.post("/students/{student_id}/ai-follow-up-drafts")
+def ai_follow_up_drafts(
+    student_id: int,
+    admin: User = Depends(require_capability("admin.student360.read")),
+    db: Session = Depends(get_db),
+):
+    """AI follow-up suggestions — DRAFT only, never auto-send."""
+    row = _get_student_or_404(db, student_id)
+    raw = _decrypt_student_profile(row)
+    snap = crm.crm_snapshot(db, row, raw)
+    drafts = crm.ai_follow_up_drafts(student_id=student_id, crm=snap)
+    assert all(d.get("auto_send") is False for d in drafts)
+    assert all(d.get("source") == "AI_ASSISTED" for d in drafts)
+    return {"student_id": student_id, "drafts": drafts, "auto_send": False}

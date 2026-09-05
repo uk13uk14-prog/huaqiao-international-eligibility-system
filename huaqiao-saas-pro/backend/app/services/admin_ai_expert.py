@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..models import ConsultationReportVersion, ExpertConsultation, StudentMasterProfile, StudentTimelineItem, User
 from .admin_privacy import redact_profile_for_admin
+from . import student_crm as crm
 from .expert_report import generate_expert_consult_draft
 
 REPORT_KINDS = {
@@ -87,6 +88,8 @@ def build_ai_context(
     eligibility: dict | None = None,
     prior_consultations: list[dict] | None = None,
     owner: dict | None = None,
+    crm: dict | None = None,
+    follow_up_summary: str = "",
 ) -> str:
     """Context strictly for one student_id — no sibling student data."""
     mini = minimize_profile_for_ai(profile)
@@ -160,6 +163,11 @@ def build_ai_context(
         pass
     if f"student_id={student_id}" not in ctx:
         raise RuntimeError("AI context isolation failed")
+    if crm:
+        from .student_crm import enrich_ai_context_block
+        ctx += enrich_ai_context_block(crm, follow_up_summary)
+    # ensure no cipher markers
+    assert "cipher_blob" not in ctx
     return ctx
 
 
