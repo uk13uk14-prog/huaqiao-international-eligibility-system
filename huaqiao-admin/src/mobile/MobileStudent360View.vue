@@ -337,7 +337,13 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.m-page { padding: 8px 14px 12px; }
+.m-page {
+  padding: 8px 14px 12px;
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+.ops-banner .v { word-break: break-word; }
 .m-hd h1 { margin: 4px 0 0; font-size: 20px; }
 .m-hd p { margin: 4px 0 8px; }
 .back { border: 0; background: transparent; color: var(--gq-sea); font-size: 15px; padding: 0; }
