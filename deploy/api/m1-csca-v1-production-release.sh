@@ -27,6 +27,8 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=deploy/api/lib/notification_008_schema_guard.sh
 source "${ROOT}/deploy/api/lib/notification_008_schema_guard.sh"
+# shellcheck source=deploy/api/lib/csca_009_integrity_guard.sh
+source "${ROOT}/deploy/api/lib/csca_009_integrity_guard.sh"
 BACKEND="${ROOT}/huaqiao-saas-pro/backend"
 ENV_FILE="${BACKEND}/.env"
 BACKUP_DIR="${HOME}/guoqiao-backups"
@@ -39,7 +41,11 @@ EXPECTED_AFTER="009_csca_notification_rules"
 EXPECTED_RULES=51
 EXPECTED_UNI=125
 EXPECTED_TL=900
-EXPECTED_USERS=2
+# USER COUNT is a DYNAMIC production baseline — never fingerprint a fixed value (e.g. 2).
+EXPECTED_PRE_NOTIFICATION_RULES=27
+EXPECTED_CSCA_RULES=24
+EXPECTED_POST_NOTIFICATION_RULES=51
+EXPECTED_NON_CSCA_RULES=27
 SAAS_LABEL="com.guoqiao.saas-backend"
 CADDY_ADDR="127.0.0.1:8088"
 SAAS_ADDR="127.0.0.1:8010"
@@ -429,13 +435,30 @@ echo "CURRENT_DB_REVISION=${CUR_REV}"
 UNI="$(pg_sql "SELECT count(*) FROM universities;" | tr -d '[:space:]')"
 TL="$(pg_sql "SELECT count(*) FROM admission_schedules;" | tr -d '[:space:]')"
 USERS="$(pg_sql "SELECT count(*) FROM users;" | tr -d '[:space:]')"
+RULES_PRE="$(pg_sql "SELECT count(*) FROM notification_rules;" | tr -d '[:space:]')"
+PRE_UNIVERSITY_COUNT="${UNI}"
+PRE_TIMELINE_COUNT="${TL}"
+PRE_USER_COUNT="${USERS}"
+PRE_NOTIFICATION_RULE_COUNT="${RULES_PRE}"
 echo "UNIVERSITY_COUNT=${UNI}"
 echo "TIMELINE_COUNT=${TL}"
 echo "USER_COUNT=${USERS}"
-[[ "${UNI}" == "${EXPECTED_UNI}" ]] || abort "universities != ${EXPECTED_UNI}"
-[[ "${TL}" == "${EXPECTED_TL}" ]] || abort "admission_schedules != ${EXPECTED_TL}"
-[[ "${USERS}" == "${EXPECTED_USERS}" ]] || abort "users != ${EXPECTED_USERS}"
+echo "PRE_UNIVERSITY_COUNT=${PRE_UNIVERSITY_COUNT}"
+echo "PRE_TIMELINE_COUNT=${PRE_TIMELINE_COUNT}"
+echo "PRE_USER_COUNT=${PRE_USER_COUNT}"
+echo "PRE_NOTIFICATION_RULE_COUNT=${PRE_NOTIFICATION_RULE_COUNT}"
+# Dynamic user baseline: valid non-negative integer only (never a fixed user fingerprint).
+# Universities/timelines remain fixed. On 008 baseline, notification_rules must be 27.
+if [[ "${CUR_REV}" == "${EXPECTED_BEFORE}" ]]; then
+  validate_pre_fingerprint "${UNI}" "${TL}" "${USERS}" "${RULES_PRE}" \
+    || abort "pre-migration fingerprint failed"
+else
+  validate_pre_fingerprint "${UNI}" "${TL}" "${USERS}" "" \
+    || abort "pre-check fingerprint failed"
+fi
 echo "DATABASE_FINGERPRINT_GUARD=PASS"
+echo "FIXED_USER_COUNT_REMOVED=YES"
+echo "DYNAMIC_PRE_USER_COUNT=YES"
 
 HC="$(http_code "http://${SAAS_ADDR}/api/health")"
 CC="$(http_code "http://${CADDY_ADDR}/api/health")"
@@ -510,6 +533,10 @@ if [[ "${DIAGNOSTIC_ONLY}" == "YES" ]]; then
 fi
 
 section "CHECKPOINT C — BACKUP"
+echo "BACKUP_FINGERPRINT_PRE_USER_COUNT=${PRE_USER_COUNT}"
+echo "BACKUP_FINGERPRINT_PRE_UNIVERSITY_COUNT=${PRE_UNIVERSITY_COUNT}"
+echo "BACKUP_FINGERPRINT_PRE_TIMELINE_COUNT=${PRE_TIMELINE_COUNT}"
+echo "BACKUP_FINGERPRINT_PRE_NOTIFICATION_RULE_COUNT=${PRE_NOTIFICATION_RULE_COUNT}"
 mkdir -p "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}" || true
 TS="$(date +%Y%m%d_%H%M%S)"
@@ -592,6 +619,8 @@ fi
 
 section "CHECKPOINT E — SCHEMA VERIFY"
 export DATABASE_URL
+CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
+export CSCA_IN_SQL
 "${VENV_PY}" - <<'PY'
 import os, sys
 from sqlalchemy import create_engine, inspect, text
@@ -629,34 +658,71 @@ miss_cols = need_cols - cols
 if miss_cols:
     print("MISSING_NOTIFICATION_COLS", sorted(miss_cols)); sys.exit(1)
 
+rule_cols = {c["name"] for c in insp.get_columns("notification_rules")}
+need_rule_cols = {
+    "id", "event_type", "days_before", "hours_before", "enabled", "recipient_type",
+    "priority", "title_template", "body_template", "category", "created_at",
+}
+miss_rule_cols = need_rule_cols - rule_cols
+if miss_rule_cols:
+    print("MISSING_NOTIFICATION_RULE_COLS", sorted(miss_rule_cols)); sys.exit(1)
+
+csca_in = os.environ.get("CSCA_IN_SQL") or ""
 with eng.connect() as conn:
     rc = conn.execute(text("SELECT count(*) FROM notification_rules")).scalar()
+    csca = conn.execute(
+        text(f"SELECT count(*) FROM notification_rules WHERE event_type IN {csca_in}")
+    ).scalar()
+    non_csca = conn.execute(
+        text(f"SELECT count(*) FROM notification_rules WHERE event_type NOT IN {csca_in}")
+    ).scalar()
 print(f"RULE_COUNT={rc}")
+print(f"CSCA_RULE_COUNT={csca}")
+print(f"NON_CSCA_RULE_COUNT_AFTER={non_csca}")
 if int(rc) != 51:
     print("RULE_COUNT_UNEXPECTED", rc); sys.exit(1)
-csca = conn.execute(text("SELECT count(*) FROM notification_rules WHERE event_type LIKE 'CSCA_%'")).scalar()
-print(f"CSCA_RULE_COUNT={csca}")
 if int(csca) != 24:
     print("CSCA_RULE_COUNT_UNEXPECTED", csca); sys.exit(1)
+if int(non_csca) != 27:
+    print("NON_CSCA_RULE_COUNT_UNEXPECTED", non_csca); sys.exit(1)
 print("SCHEMA_VERIFY=PASS")
 PY
+CSCA_IN_SQL="$(csca_009_event_types_sql_in_list)"
 RULE_COUNT="$(pg_sql "SELECT count(*) FROM notification_rules;" | tr -d '[:space:]')"
+CSCA_RULE_COUNT="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
+NON_CSCA_RULE_COUNT_AFTER="$(pg_sql "SELECT count(*) FROM notification_rules WHERE event_type NOT IN ${CSCA_IN_SQL};" | tr -d '[:space:]')"
 echo "RULE_COUNT=${RULE_COUNT}"
-[[ "${RULE_COUNT}" == "${EXPECTED_RULES}" ]] || abort "notification_rules != ${EXPECTED_RULES}"
+echo "CSCA_RULE_COUNT=${CSCA_RULE_COUNT}"
+echo "NON_CSCA_RULE_COUNT_AFTER=${NON_CSCA_RULE_COUNT_AFTER}"
+[[ "${RULE_COUNT}" == "${EXPECTED_POST_NOTIFICATION_RULES}" ]] || abort "notification_rules != ${EXPECTED_POST_NOTIFICATION_RULES}"
+[[ "${CSCA_RULE_COUNT}" == "${EXPECTED_CSCA_RULES}" ]] || abort "CSCA_RULE_COUNT != ${EXPECTED_CSCA_RULES}"
+[[ "${NON_CSCA_RULE_COUNT_AFTER}" == "${EXPECTED_NON_CSCA_RULES}" ]] || abort "NON_CSCA_RULE_COUNT_AFTER != ${EXPECTED_NON_CSCA_RULES}"
 
 section "CHECKPOINT F — DATA INTEGRITY"
 UNI2="$(pg_sql "SELECT count(*) FROM universities;" | tr -d '[:space:]')"
 TL2="$(pg_sql "SELECT count(*) FROM admission_schedules;" | tr -d '[:space:]')"
 USERS2="$(pg_sql "SELECT count(*) FROM users;" | tr -d '[:space:]')"
+POST_UNIVERSITY_COUNT="${UNI2}"
+POST_TIMELINE_COUNT="${TL2}"
+POST_USER_COUNT="${USERS2}"
+POST_NOTIFICATION_RULE_COUNT="${RULE_COUNT}"
 PLANS2="$(pg_sql "SELECT count(*) FROM membership_plans;" | tr -d '[:space:]')"
 EC2="$(pg_sql "SELECT count(*) FROM expert_consultations;" | tr -d '[:space:]')"
 ER2="$(pg_sql "SELECT count(*) FROM eligibility_records;" | tr -d '[:space:]')"
 REV_NOW="$(pg_sql "SELECT version_num FROM alembic_version LIMIT 1;" | tr -d '[:space:]')"
 echo "DB_REVISION_AFTER=${REV_NOW}"
 echo "universities=${UNI2} timelines=${TL2} users=${USERS2} plans=${PLANS2} expert=${EC2} eligibility=${ER2}"
+echo "POST_USER_COUNT=${POST_USER_COUNT}"
+echo "POST_UNIVERSITY_COUNT=${POST_UNIVERSITY_COUNT}"
+echo "POST_TIMELINE_COUNT=${POST_TIMELINE_COUNT}"
+echo "POST_NOTIFICATION_RULE_COUNT=${POST_NOTIFICATION_RULE_COUNT}"
 [[ "${REV_NOW}" == "${EXPECTED_AFTER}" ]] || abort "revision after migrate != 009"
-[[ "${UNI2}" == "${EXPECTED_UNI}" && "${TL2}" == "${EXPECTED_TL}" && "${USERS2}" == "${EXPECTED_USERS}" ]] \
-  || abort "core counts drifted"
+validate_post_integrity \
+  "${PRE_USER_COUNT}" "${POST_USER_COUNT}" \
+  "${PRE_UNIVERSITY_COUNT}" "${POST_UNIVERSITY_COUNT}" \
+  "${PRE_TIMELINE_COUNT}" "${POST_TIMELINE_COUNT}" \
+  "${POST_NOTIFICATION_RULE_COUNT}" "${CSCA_RULE_COUNT}" "${NON_CSCA_RULE_COUNT_AFTER}" \
+  || abort "post-migration integrity failed (fail closed)"
 [[ "${PLANS2}" == "${PLANS_BEFORE}" ]] || abort "membership_plans count changed"
 [[ "${EC2}" == "${EC_BEFORE}" ]] || abort "expert_consultations count changed"
 [[ "${ER2}" == "${ER_BEFORE}" ]] || abort "eligibility_records count changed"
