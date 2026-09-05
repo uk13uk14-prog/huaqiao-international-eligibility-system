@@ -32,7 +32,19 @@ DEFAULT_QUIET_END = "08:00"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 MAX_SEND_RETRIES = 3
 
+CSCA_EVENT_TYPES = (
+    "CSCA_REGISTRATION_DEADLINE",
+    "CSCA_EXAM_DATE",
+    "CSCA_RESULT_DATE",
+    "CSCA_PREPARATION",
+)
+
 TITLE_EVENT_HINTS = (
+    # CSCA-specific hints MUST come before generic 考试 / 报名
+    (("CSCA报名", "CSCA 报名"), "CSCA_REGISTRATION_DEADLINE"),
+    (("CSCA考试", "CSCA 考试"), "CSCA_EXAM_DATE"),
+    (("CSCA成绩", "CSCA 成绩"), "CSCA_RESULT_DATE"),
+    (("CSCA准备", "CSCA 准备", "CSCA备考"), "CSCA_PREPARATION"),
     (("报名", "申请截止", "网申", "报名开放", "申请"), "APPLICATION_DEADLINE"),
     (("材料", "交材料", "材料截止"), "MATERIAL_DEADLINE"),
     (("考试", "笔试", "机考"), "EXAM_DATE"),

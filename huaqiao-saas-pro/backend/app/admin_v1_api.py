@@ -440,10 +440,12 @@ def student_360(
             "identity": profile.get("identity") or {},
             "education": profile.get("education") or {},
             "language_exams": (profile.get("courses") or {}).get("language_exams") or [],
+            "csca": profile.get("csca") or {},
             "goals": profile.get("goals") or {},
             "planning": profile.get("planning") or {},
             "summary": profile.get("summary") or profile_summary(raw),
         },
+        "csca_card": __import__("app.services.csca", fromlist=["csca_card"]).csca_card(profile.get("csca")),
         "eligibility": eligibility,
         "timeline": timeline,
         "consultations": consultations,
@@ -676,3 +678,157 @@ def settings_view(admin: User = Depends(require_capability("admin.settings"))):
             "production_db_changed": False,
         },
     }
+
+
+
+class AdminCscaPatch(BaseModel):
+    csca_status: str | None = None
+    csca_exam_date: str | None = None
+    csca_registration_deadline: str | None = None
+    csca_result_date: str | None = None
+    csca_score: str | None = None
+    csca_level: str | None = None
+    csca_notes: str | None = None
+
+
+@router.patch("/students/{student_id}/csca")
+def update_student_csca(
+    student_id: int,
+    payload: AdminCscaPatch,
+    admin: User = Depends(require_capability("admin.student360.write")),
+    db: Session = Depends(get_db),
+):
+    """Admin assist update for CSCA section. Requires audit. Never invents dates."""
+    from datetime import datetime as _dt
+
+    from .services.csca import csca_card, normalize_csca, sync_csca_timeline, _now_iso
+    from .services.student_profile import display_name_of, normalize_profile
+    from .services.vault_crypto import encrypt_profile_json
+
+    row = _get_student_or_404(db, student_id)
+    raw = _decrypt_student_profile(row)
+    current = normalize_csca(raw.get("csca"))
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if v is not None:
+            current[k] = v
+    if data.get("csca_registration_deadline"):
+        current["registration_deadline_source"] = "admin"
+    if data.get("csca_exam_date"):
+        current["exam_date_source"] = "admin"
+    if data.get("csca_result_date"):
+        current["result_date_source"] = "admin"
+    current = normalize_csca(current)
+    current["updated_at"] = _now_iso()
+    raw["csca"] = current
+    doc = normalize_profile(raw)
+    row.cipher_blob = encrypt_profile_json(doc)
+    row.display_name = display_name_of(doc)
+    row.updated_at = _dt.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    sync = sync_csca_timeline(
+        db,
+        student_id=row.id,
+        user_id=row.user_id,
+        tenant_id=row.tenant_id,
+        csca=current,
+        commit=True,
+    )
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.CSCA_UPDATE,
+        resource_type="student_master_profile",
+        resource_id=student_id,
+        student_id=student_id,
+        metadata={
+            "view": "student_360_csca",
+            "csca_status": current.get("csca_status"),
+            "fields": sorted(data.keys()),
+            "timeline_sync": {k: sync.get(k) for k in ("created", "updated", "removed")},
+        },
+    )
+    card = csca_card(current)
+    assert "cipher_blob" not in card
+    return {
+        "student_id": student_id,
+        "csca": current,
+        "csca_card": card,
+        "timeline_sync": sync,
+        "fake_date_allowed": False,
+    }
+
+
+@router.patch("/students/{student_id}/csca")
+def update_student_csca(
+    student_id: int,
+    payload: AdminCscaPatch,
+    admin: User = Depends(require_capability("admin.student360.write")),
+    db: Session = Depends(get_db),
+):
+    """Admin assist update for CSCA section. Requires audit. Never invents dates."""
+    from .services.csca import normalize_csca, sync_csca_timeline, csca_card, _now_iso
+    from .services.vault_crypto import encrypt_profile_json
+    from .services.student_profile import display_name_of, normalize_profile
+    from datetime import datetime as _dt
+
+    row = _get_student_or_404(db, student_id)
+    raw = _decrypt_student_profile(row)
+    current = normalize_csca(raw.get("csca"))
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if v is not None:
+            current[k] = v
+    # Admin-entered dates get source=admin when provided
+    if "csca_registration_deadline" in data and data["csca_registration_deadline"]:
+        current["registration_deadline_source"] = "admin"
+    if "csca_exam_date" in data and data["csca_exam_date"]:
+        current["exam_date_source"] = "admin"
+    if "csca_result_date" in data and data["csca_result_date"]:
+        current["result_date_source"] = "admin"
+    current = normalize_csca(current)
+    current["updated_at"] = _now_iso()
+    raw["csca"] = current
+    doc = normalize_profile(raw)
+    row.cipher_blob = encrypt_profile_json(doc)
+    row.display_name = display_name_of(doc)
+    row.updated_at = _dt.utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    sync = sync_csca_timeline(
+        db,
+        student_id=row.id,
+        user_id=row.user_id,
+        tenant_id=row.tenant_id,
+        csca=current,
+        commit=True,
+    )
+    admin_audit.record_audit(
+        db,
+        actor_user_id=admin.id,
+        action=admin_audit.CSCA_UPDATE,
+        resource_type="student_master_profile",
+        resource_id=student_id,
+        student_id=student_id,
+        metadata={
+            "view": "student_360_csca",
+            "csca_status": current.get("csca_status"),
+            "fields": sorted(data.keys()),
+            "timeline_sync": {k: sync.get(k) for k in ("created", "updated", "removed")},
+        },
+    )
+    card = csca_card(current)
+    assert "cipher_blob" not in card
+    return {
+        "student_id": student_id,
+        "csca": current,
+        "csca_card": card,
+        "timeline_sync": sync,
+        "fake_date_allowed": False,
+    }
+

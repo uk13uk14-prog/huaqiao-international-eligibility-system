@@ -192,6 +192,29 @@
         <div class="flow-actions"><van-button type="primary" block round :loading="saving" @click="save('summary')">{{ saveLabel }}</van-button></div>
       </div>
 
+
+      <div v-show="section==='csca'" class="form-card">
+        <h3 class="block-title">CSCA 考试</h3>
+        <van-field label="状态" is-link readonly :model-value="cscaStatusLabel" placeholder="选择状态" @click="showCscaStatus = true" />
+        <van-field v-model="profile.csca.csca_registration_deadline" label="报名截止" placeholder="YYYY-MM-DD，无则留空" />
+        <van-field v-model="profile.csca.csca_exam_date" label="考试日期" placeholder="YYYY-MM-DD，无则留空" />
+        <van-field v-model="profile.csca.csca_result_date" label="成绩发布" placeholder="YYYY-MM-DD，无则留空" />
+        <van-field v-model="profile.csca.csca_score" label="成绩" placeholder="可选" />
+        <van-field v-model="profile.csca.csca_level" label="等级" placeholder="可选" />
+        <van-field v-model="profile.csca.csca_notes" label="备注" type="textarea" rows="2" autosize />
+        <p class="confirm-hint">日期须真实录入；留空则显示「待官方公布」，系统不会编造日期。</p>
+        <div class="quick-actions">
+          <van-button size="small" round @click="setCscaStatus('PLANNED')">计划参加</van-button>
+          <van-button size="small" round @click="setCscaStatus('REGISTERED')">已报名</van-button>
+          <van-button size="small" round @click="setCscaStatus('TAKEN')">已考试</van-button>
+          <van-button size="small" round type="primary" @click="focusCscaScore">录入成绩</van-button>
+        </div>
+        <div class="flow-actions"><van-button type="primary" block round :loading="saving" @click="save('csca')">{{ saveLabel }}</van-button></div>
+        <van-popup v-model:show="showCscaStatus" position="bottom" round>
+          <van-picker :columns="cscaStatusColumns" @confirm="onPickCscaStatus" @cancel="showCscaStatus=false" />
+        </van-popup>
+      </div>
+
       <div v-show="section==='portrait'" class="form-card">
         <div class="consult-actions" style="padding:8px 12px;"><van-button block round @click="refreshPortrait">刷新画像</van-button></div>
         <p class="confirm-hint">自动从档案生成 · v{{ portrait?.portrait_version || '—' }}</p>
@@ -264,7 +287,7 @@ import {
   syncStudentsAndActive,
 } from './activeStudent'
 import { getSaasToken, saasApi } from './saasApi'
-import { PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
+import { CSCA_STATUS_OPTIONS, PRIORITY_LEVELS, SECTIONS, STATUS_LABEL, TIMELINE_STATUS_LABEL, WIZARD_SECTIONS, emptyCourse, emptyCsca, emptyGrade, emptyLang, emptyOther, emptySchool, emptyTarget } from './studentProfileLib'
 
 const emit = defineEmits(['goto-judge', 'goto-member'])
 const sections = SECTIONS
@@ -289,6 +312,12 @@ const slots = ref({
   student_profile_remaining: 1,
   student_profile_over_quota: 0,
   can_create_student: true,
+})
+const showCscaStatus = ref(false)
+const cscaStatusColumns = CSCA_STATUS_OPTIONS.map(o => ({ text: o.label, value: o.value }))
+const cscaStatusLabel = computed(() => {
+  const v = profile.value?.csca?.csca_status || 'NOT_PLANNED'
+  return CSCA_STATUS_OPTIONS.find(o => o.value === v)?.label || v
 })
 const section = ref('summary')
 const saving = ref(false)
@@ -344,6 +373,7 @@ function addMathBundle() {
 function apply(r) {
   loadedStudentId.value = normalizeStudentId(r.id)
   profile.value = r.profile
+  if (!profile.value.csca) profile.value.csca = emptyCsca()
   completeness.value = r.completeness || { percent: 0, missing: [] }
   portrait.value = r.portrait || null
   if (r.slots) slots.value = r.slots
@@ -429,6 +459,31 @@ function onPickStudent(payload) {
   const id = extractPickerStudentId(payload)
   if (id) open(id)
 }
+
+function ensureCsca() {
+  if (!profile.value) return
+  if (!profile.value.csca) profile.value.csca = emptyCsca()
+}
+function setCscaStatus(status) {
+  ensureCsca()
+  profile.value.csca.csca_status = status
+}
+function focusCscaScore() {
+  ensureCsca()
+  const cur = profile.value.csca.csca_status
+  if (cur === 'NOT_PLANNED' || cur === 'PLANNED' || cur === 'REGISTERED') {
+    profile.value.csca.csca_status = 'TAKEN'
+  } else {
+    profile.value.csca.csca_status = 'RESULT_AVAILABLE'
+  }
+}
+function onPickCscaStatus({ selectedOptions }) {
+  ensureCsca()
+  const opt = selectedOptions?.[0]
+  if (opt) profile.value.csca.csca_status = opt.value
+  showCscaStatus.value = false
+}
+
 async function save(key) {
   if (!activeStudentId.value) return
   if (key === 'portrait' || key === 'my_timeline') return

@@ -17,9 +17,34 @@
             <el-tab-pane label="身份/国籍"><pre class="gq-pre">{{ pretty(data.sections.identity) }}</pre></el-tab-pane>
             <el-tab-pane label="教育背景"><pre class="gq-pre">{{ pretty(data.sections.education) }}</pre></el-tab-pane>
             <el-tab-pane label="语言成绩"><pre class="gq-pre">{{ pretty(data.sections.language_exams) }}</pre></el-tab-pane>
+            <el-tab-pane label="CSCA考试"><pre class="gq-pre">{{ pretty(data.csca_card || data.sections.csca) }}</pre></el-tab-pane>
             <el-tab-pane label="目标大学/专业"><pre class="gq-pre">{{ pretty(data.sections.goals) }}</pre></el-tab-pane>
           </el-tabs>
         </section>
+        
+        <section class="gq-panel block" v-if="data.csca_card || data.sections?.csca">
+          <h3>CSCA 考试</h3>
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="状态">{{ data.csca_card?.csca_status_label || data.sections?.csca?.csca_status || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="报名截止">{{ data.csca_card?.csca_registration_deadline || '待官方公布' }}</el-descriptions-item>
+            <el-descriptions-item label="考试日期">{{ data.csca_card?.csca_exam_date || '待官方公布' }}</el-descriptions-item>
+            <el-descriptions-item label="成绩状态">{{ data.csca_card?.csca_score ? '已录入' : '暂无' }}</el-descriptions-item>
+            <el-descriptions-item label="成绩">{{ data.csca_card?.csca_score || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="最近更新">{{ data.csca_card?.updated_at || data.sections?.csca?.updated_at || '—' }}</el-descriptions-item>
+          </el-descriptions>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <el-select v-model="cscaForm.csca_status" placeholder="状态" style="width:160px">
+              <el-option v-for="o in cscaStatuses" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+            <el-input v-model="cscaForm.csca_registration_deadline" placeholder="报名截止 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_exam_date" placeholder="考试日期 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_result_date" placeholder="成绩发布 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_score" placeholder="成绩" style="width:120px" />
+            <el-button type="primary" size="small" :loading="cscaSaving" @click="saveCsca">协助更新（审计）</el-button>
+          </div>
+          <p class="gq-muted" style="margin-top:6px">仅可填写真实日期；留空表示待官方公布。禁止编造。</p>
+        </section>
+
         <section class="gq-panel block">
           <h3>资格结果</h3>
           <el-alert

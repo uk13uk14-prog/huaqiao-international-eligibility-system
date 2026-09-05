@@ -85,6 +85,7 @@ export const saasApi = {
   students: () => saasRequest('/api/students'),
   createStudent: (data) => saasRequest('/api/students', { method: 'POST', body: JSON.stringify(data || {}) }),
   student: (id) => saasRequest(`/api/students/${id}`),
+  studentCsca: (id) => saasRequest(`/api/students/${id}/csca`),
   patchStudentSection: (id, section, data) =>
     saasRequest(`/api/students/${id}/sections/${section}`, { method: 'PATCH', body: JSON.stringify({ data }) }),
   completeStudentWizard: (id) => saasRequest(`/api/students/${id}/complete-wizard`, { method: 'POST', body: '{}' }),

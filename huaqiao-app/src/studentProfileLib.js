@@ -3,6 +3,29 @@ export const CURRICULUMS = ['A-Level','GCSE','IGCSE','IB','AP','SAT','ACT','Cana
 export const GRADE_TYPES = ['Actual','Predicted','Mock','School Assessment','Other']
 export const LANGUAGE_EXAMS = ['HSK','IELTS','TOEFL','Duolingo','Other']
 export const OTHER_EXAM_TYPES = ['CSCA','SAT','ACT','AP','竞赛','其他资格']
+export const CSCA_STATUS_OPTIONS = [
+  { value: 'NOT_PLANNED', label: '未计划' },
+  { value: 'PLANNED', label: '计划参加' },
+  { value: 'REGISTERED', label: '已报名' },
+  { value: 'TAKEN', label: '已考试' },
+  { value: 'RESULT_AVAILABLE', label: '成绩已出' },
+]
+export function emptyCsca(extra = {}) {
+  return {
+    csca_status: 'NOT_PLANNED',
+    csca_exam_date: '',
+    csca_registration_deadline: '',
+    csca_result_date: '',
+    csca_score: '',
+    csca_level: '',
+    csca_notes: '',
+    registration_deadline_source: '',
+    exam_date_source: '',
+    result_date_source: '',
+    updated_at: '',
+    ...extra,
+  }
+}
 export const PRIORITY_LEVELS = [
   { value: 'reach', label: '冲刺' },
   { value: 'target', label: '主申' },
@@ -19,6 +42,7 @@ export const SECTIONS = [
   { key: 'portrait', label: '学生画像' },
   { key: 'my_timeline', label: '升学时间轴' },
   { key: 'planning', label: '申请与规划' },
+  { key: 'csca', label: 'CSCA考试' },
 ]
 export const WIZARD_SECTIONS = [
   { key: 'basic_info', label: '基本信息' },
@@ -88,6 +112,7 @@ export function emptyProfile() {
     },
     planning: { current_education_stage: '', target_countries: '', planning_notes: '' },
     summary: { summary_notes: '' },
+    csca: emptyCsca(),
     legacy: {},
   }
 }

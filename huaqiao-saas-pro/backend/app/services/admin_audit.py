@@ -15,6 +15,7 @@ from ..models import AuditEvent
 
 # Actions used by Admin V1
 VIEW_STUDENT = "VIEW_STUDENT"
+CSCA_UPDATE = "CSCA_UPDATE"
 AI_GENERATE = "AI_GENERATE"
 AI_EDIT = "AI_EDIT"
 AI_APPROVE = "AI_APPROVE"

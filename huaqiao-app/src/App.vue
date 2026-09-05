@@ -87,6 +87,7 @@
           <van-grid-item icon="description" text="教外函政策" @click="openLawsPolicy" />
           <van-grid-item icon="wap-home-o" text="大学库" @click="openPage('universities')" />
           <van-grid-item icon="underway-o" text="招生时间" @click="openPage('schedule')" />
+          <van-grid-item icon="edit" text="CSCA考试" @click="openPage('csca')" />
           <van-grid-item icon="records-o" text="历史记录" @click="openPage('history')" />
           <van-grid-item icon="vip-card-o" text="会员中心" @click="openPage('member')" />
           <van-grid-item icon="service-o" text="一对一规划咨询" @click="openConsultWithGate" />
@@ -223,6 +224,10 @@
 
       <section v-if="tab === 'profile'" class="list-screen">
         <StudentProfile @goto-judge="onGotoJudgeFromProfile" @goto-member="openPage('member')" />
+      </section>
+
+      <section v-if="tab === 'csca'" class="list-screen">
+        <CscaExamCenter @goto-profile="openPage('profile')" @goto-timeline="openPage('profile')" />
       </section>
 
       <section v-if="tab === 'laws'" class="list-screen laws-screen">
@@ -525,6 +530,7 @@ import AuthGate from './AuthGate.vue'
 import { normalizeSaasUser } from './authSession.js'
 import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
+import CscaExamCenter from './CscaExamCenter.vue'
 
 const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
 
@@ -743,7 +749,7 @@ const monthOptions = [{ text: '全部月份', value: '' }, ...Array.from({ lengt
 const pendingLawScroll = ref(null)
 
 const form = ref(defaultForm('international'))
-const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', notifications: '通知中心' }[tab.value]))
+const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', csca: 'CSCA考试中心', notifications: '通知中心' }[tab.value]))
 const judgeTypeLabel = computed(() => judgeType.value === 'huaqiao' ? '华侨生' : '国际生')
 
 watch(targetFilter, (v) => { eligibilityContext.value = v })
@@ -915,6 +921,7 @@ async function openNotifItem(n) {
   try { if (n.unread) await saasApi.notificationRead(n.id) } catch { /* ignore */ }
   const et = n.event_type || ''
   if (et.includes('EXPERT') || et.includes('REPORT')) openPage('member')
+  else if (et.includes('CSCA')) openPage('csca')
   else if (et.includes('DEADLINE') || et.includes('TIMELINE')) openPage('schedule')
   else if (et.includes('MEMBER') || et.includes('TRIAL')) openPage('member')
   else if (et.includes('PROFILE') || et.includes('ELIGIBILITY')) openPage('profile')
