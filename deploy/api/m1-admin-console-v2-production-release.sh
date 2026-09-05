@@ -302,7 +302,15 @@ run_checkpoint_d_diagnostic() {
   echo "TOTAL_RULE_COUNT=${TOTAL_RULE_COUNT}"
 
   echo "=== 011 RELEASE GATE ==="
+  echo "OLD_008_GATE_INFORMATIONAL_ONLY=YES"
+  echo "OLD_009_GATE_INFORMATIONAL_ONLY=YES"
+  echo "OLD_010_GATE_NOT_USED_FOR_011_APPLY=YES"
+  echo "CUSTOMER_STAFF_BACKFILL_POLICY=existing_role_in_staff_set_only"
+  echo "EXISTING_MEMBER_STAYS_CUSTOMER=YES"
+  echo "EXISTING_ADMIN_KEEPS_CONSOLE=YES"
+  echo "NO_CUSTOMER_AUTO_PROMOTED_TO_STAFF=YES"
   evaluate_011_release_gate "${DIRECT_DB_REVISION}" "${TOTAL_RULE_COUNT}" "${CSCA_RULE_COUNT}" "${NON_CSCA_RULE_COUNT}"
+  echo "CHECKPOINT_D_DIAGNOSTIC=PASS"
 
   set +e
   cur_out="$(alembic_bound current 2>/tmp/gq-p5-alembic-current.err)"

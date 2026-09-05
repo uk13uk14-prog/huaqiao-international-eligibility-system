@@ -43,6 +43,17 @@ classify_011_release_state "009_csca_notification_rules" 51 24 27 "${NO5[@]}" >/
 [[ "$SCHEMA_STATE_011" == "D_INCONSISTENT_011" ]] \
   && ok "CASE5_WRONG_REV" || ko "CASE5_WRONG_REV ($SCHEMA_STATE_011)"
 
+# Independence: stale 008/009/010 apply flags must not decide 011.
+ALLOW_008_UPGRADE=NO
+ALLOW_009_UPGRADE=NO
+ALLOW_010_UPGRADE=NO
+CLEAN_PRE_010=NO
+PARTIAL_010=YES
+INCONSISTENT_010=YES
+classify_011_release_state "$EXPECTED_BEFORE" 51 24 27 "${NO5[@]}" >/dev/null
+[[ "$SCHEMA_STATE_011" == "A_CLEAN_PRE_011" && "$ALLOW_011_UPGRADE" == "YES" ]] \
+  && ok "CASE5B_INDEPENDENT_OF_OLD_GATES" || ko "CASE5B_INDEPENDENT_OF_OLD_GATES ($SCHEMA_STATE_011 allow=$ALLOW_011_UPGRADE)"
+
 validate_011_account_kind_integrity 10 3 10 3 7 0 >/dev/null \
   && ok "CASE6_KIND_OK" || ko "CASE6_KIND_OK"
 validate_011_account_kind_integrity 10 3 10 4 6 1 >/dev/null \

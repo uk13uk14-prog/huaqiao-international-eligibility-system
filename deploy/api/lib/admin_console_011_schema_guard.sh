@@ -106,7 +106,13 @@ classify_011_release_state() {
   admin011_emit_diagnostic_keys "${rev}"
 }
 
-# Staff/customer backfill must not flip members into STAFF.
+# Staff/customer backfill policy (011 adds metadata only; does not change users.role):
+#   PRE_STAFF = count(role in admin|super_admin|operations_admin|consultant|support)
+#   PRE_CUSTOMER = PRE_USER_COUNT - PRE_STAFF
+#   After: account_kind=STAFF iff role already in that set; everyone else CUSTOMER.
+#   Existing member/customer cannot gain admin login. Existing admin keeps console.
+#   Require POST_USER==PRE_USER, POST_CUSTOMER==PRE_CUSTOMER,
+#   POST_STAFF>=PRE_STAFF and POST_STAFF==PRE_STAFF (no silent customer→staff).
 # validate_011_account_kind_integrity <pre_users> <pre_staff_by_role> <post_users> <post_staff> <post_customer> <illegal_staff>
 validate_011_account_kind_integrity() {
   local pre_users="${1:-}"
@@ -121,8 +127,16 @@ validate_011_account_kind_integrity() {
     echo "ACCOUNT_KIND_INTEGRITY_FAIL=user_count_changed:${pre_users}->${post_users}"
     return 1
   fi
-  if [[ "${post_staff}" != "${pre_staff}" ]]; then
-    echo "ACCOUNT_KIND_INTEGRITY_FAIL=staff_flipped:${pre_staff}->${post_staff}"
+  if ! [[ "${post_staff}" =~ ^[0-9]+$ && "${pre_staff}" =~ ^[0-9]+$ ]]; then
+    echo "ACCOUNT_KIND_INTEGRITY_FAIL=staff_not_int:${pre_staff}->${post_staff}"
+    return 1
+  fi
+  if [[ "${post_staff}" -lt "${pre_staff}" ]]; then
+    echo "ACCOUNT_KIND_INTEGRITY_FAIL=staff_lost:${pre_staff}->${post_staff}"
+    return 1
+  fi
+  if [[ "${post_staff}" -gt "${pre_staff}" ]]; then
+    echo "ACCOUNT_KIND_INTEGRITY_FAIL=staff_grew_without_role_source:${pre_staff}->${post_staff}"
     return 1
   fi
   if [[ "${post_customer}" != "${expected_customer}" ]]; then
