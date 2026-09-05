@@ -23,7 +23,8 @@
         <strong>{{ s.display_name || `学生 #${s.id}` }}</strong>
         <el-tag size="small" type="info">#{{ s.id }}</el-tag>
       </div>
-      <p class="gq-muted meta">{{ s.owner?.email || s.user_id }} · {{ s.status || '—' }}</p>
+      <p class="gq-muted meta">{{ s.owner?.email || s.user_id }} · {{ s.crm_stage_label || s.status || '—' }}</p>
+      <p class="hint">负责人：{{ s.assignee_label || '未分配' }} · 下一步：{{ s.next_action || '—' }}</p>
       <p class="hint">{{ s.goal_hint || '暂无目标提示' }}</p>
     </article>
   </div>

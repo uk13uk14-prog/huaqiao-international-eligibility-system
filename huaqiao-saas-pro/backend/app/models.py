@@ -176,6 +176,32 @@ class StudentMasterProfile(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     archived_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
+    # CRM V1 (migration 010) — operational fields; never put assignee only in cipher JSON
+    assignee_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    assigned_at = Column(DateTime, nullable=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    crm_stage = Column(String(40), default="UNASSIGNED", index=True)
+    risk_level = Column(String(20), default="NONE")
+    next_action = Column(Text, default="")
+    next_follow_up_at = Column(DateTime, nullable=True, index=True)
+    last_follow_up_at = Column(DateTime, nullable=True)
+    identity_track = Column(String(40), default="")
+
+
+class StudentFollowUp(Base):
+    """CRM follow-up / activity log. AI_ASSISTED must never pretend to be HUMAN."""
+    __tablename__ = "student_follow_ups"
+    id = Column(Integer, primary_key=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=False)
+    operator_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    operator_type = Column(String(20), default="STAFF")  # ADMIN | STAFF | SYSTEM
+    source = Column(String(20), default="HUMAN")  # HUMAN | AI_ASSISTED | SYSTEM
+    type = Column(String(40), default="NOTE")
+    content = Column(Text, default="")
+    summary = Column(String(240), default="")
+    next_action = Column(Text, nullable=True)
+    next_follow_up_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class StudentTimelineItem(Base):

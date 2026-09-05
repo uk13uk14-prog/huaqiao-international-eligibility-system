@@ -82,8 +82,32 @@ export const api = {
   dashboard: () => request('/api/admin/v1/dashboard'),
   users: (q) => request(`/api/admin/v1/users${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   user: (id) => request(`/api/admin/v1/users/${id}`),
-  students: (q) => request(`/api/admin/v1/students${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  students: (params = {}) => {
+    const q = new URLSearchParams()
+    if (typeof params === 'string') {
+      if (params) q.set('q', params)
+    } else {
+      Object.entries(params || {}).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+      })
+    }
+    const qs = q.toString()
+    return request(`/api/admin/v1/students${qs ? `?${qs}` : ''}`)
+  },
+  staff: () => request('/api/admin/v1/staff'),
   student360: (id) => request(`/api/admin/v1/students/${id}`),
+  assignStudent: (id, assignee_user_id) =>
+    request(`/api/admin/v1/students/${id}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ assignee_user_id }),
+    }),
+  patchStudentCrm: (id, data) =>
+    request(`/api/admin/v1/students/${id}/crm`, { method: 'PATCH', body: JSON.stringify(data) }),
+  followUps: (id) => request(`/api/admin/v1/students/${id}/follow-ups`),
+  createFollowUp: (id, data) =>
+    request(`/api/admin/v1/students/${id}/follow-ups`, { method: 'POST', body: JSON.stringify(data) }),
+  aiFollowUpDrafts: (id) =>
+    request(`/api/admin/v1/students/${id}/ai-follow-up-drafts`, { method: 'POST', body: '{}' }),
   patchStudentCsca: (id, data) => request(`/api/admin/v1/students/${id}/csca`, { method: 'PATCH', body: JSON.stringify(data) }),
   studentTimeline: (id) => request(`/api/admin/v1/students/${id}/timeline`),
   studentEligibility: (id) => request(`/api/admin/v1/students/${id}/eligibility`),

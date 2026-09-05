@@ -719,8 +719,25 @@ def profile_summary(profile: dict) -> dict[str, Any]:
 
 
 def display_name_of(profile: dict) -> str:
+    """Canonical student name for denormalized student_master_profiles.display_name.
+
+    Priority: chinese_name → english_name → preferred_name/legal_name aliases → 未命名学生.
+    Never uses account email. Never invents a name.
+    """
     p = normalize_profile(profile)
-    return p["basic_info"].get("chinese_name") or p["basic_info"].get("english_name") or "未命名学生"
+    basic = p.get("basic_info") or {}
+    for key in (
+        "chinese_name",
+        "english_name",
+        "preferred_name",
+        "legal_name",
+        "full_name",
+        "name",
+    ):
+        val = str(basic.get(key) or "").strip()
+        if val and "@" not in val:
+            return val
+    return "未命名学生"
 
 
 def judge_prefills(profile: dict) -> dict[str, Any]:
