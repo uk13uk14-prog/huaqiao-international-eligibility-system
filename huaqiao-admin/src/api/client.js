@@ -84,6 +84,7 @@ export const api = {
   user: (id) => request(`/api/admin/v1/users/${id}`),
   students: (q) => request(`/api/admin/v1/students${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   student360: (id) => request(`/api/admin/v1/students/${id}`),
+  patchStudentCsca: (id, data) => request(`/api/admin/v1/students/${id}/csca`, { method: 'PATCH', body: JSON.stringify(data) }),
   studentTimeline: (id) => request(`/api/admin/v1/students/${id}/timeline`),
   studentEligibility: (id) => request(`/api/admin/v1/students/${id}/eligibility`),
   studentConsultations: (id) => request(`/api/admin/v1/students/${id}/consultations`),

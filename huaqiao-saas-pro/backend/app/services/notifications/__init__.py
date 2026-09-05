@@ -19,6 +19,7 @@ from .providers import deliver, provider_status
 from .quiet_hours import in_quiet_hours, should_defer_send
 from .reminders import (
     cancel_reminders_for_completed_item,
+    ensure_csca_rules,
     ensure_default_rules,
     generate_for_timeline_item,
     infer_event_type,
@@ -48,6 +49,7 @@ __all__ = [
     "refuse_invented_date",
     "in_quiet_hours",
     "should_defer_send",
+    "ensure_csca_rules",
     "ensure_default_rules",
     "deliver",
     "build_dedupe_key",

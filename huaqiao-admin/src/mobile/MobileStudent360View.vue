@@ -86,6 +86,7 @@ const profileSections = computed(() => {
     { key: 'identity', label: '身份 / 国籍', value: s.identity, open: false },
     { key: 'education', label: '教育背景', value: s.education, open: false },
     { key: 'language', label: '语言成绩', value: s.language_exams, open: false },
+    { key: 'csca', label: 'CSCA考试', value: data.value?.csca_card || s.csca, open: true },
     { key: 'goals', label: '目标大学 / 专业', value: s.goals, open: false },
   ]
 })

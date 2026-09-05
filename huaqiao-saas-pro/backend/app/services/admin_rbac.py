@@ -33,6 +33,7 @@ ROLE_CAPABILITIES: dict[AdminConsoleRole, frozenset[str]] = {
             "admin.users.read",
             "admin.students.read",
             "admin.student360.read",
+            "admin.student360.write",
             "admin.ai.generate",
             "admin.ai.edit",
             "admin.ai.approve",
@@ -47,6 +48,7 @@ ROLE_CAPABILITIES: dict[AdminConsoleRole, frozenset[str]] = {
             "admin.dashboard",
             "admin.students.read",  # assigned only — future filter
             "admin.student360.read",
+            "admin.student360.write",
             "admin.ai.generate",
             "admin.ai.edit",
             "admin.ai.approve",

@@ -11,6 +11,7 @@ from .constants import (
     CATEGORY_OPS,
     CATEGORY_TIMELINE,
     COMPLETED_TIMELINE_STATUSES,
+    CSCA_EVENT_TYPES,
     DEFAULT_DEADLINE_LADDER,
     PRIORITY_HIGH,
     PRIORITY_NORMAL,
@@ -72,6 +73,39 @@ def ensure_default_rules(db: Session) -> int:
     return len(rows)
 
 
+
+def ensure_csca_rules(db: Session) -> int:
+    """Additive CSCA reminder rules (T-30/14/7/3/1/0). Safe when other rules already exist."""
+    existing = {
+        (row.event_type, row.days_before, row.recipient_type)
+        for row in db.query(NotificationRule).filter(NotificationRule.event_type.in_(CSCA_EVENT_TYPES)).all()
+    }
+    ladder = [
+        (30, "NORMAL", "距离{label}还有30天", "请提前准备 CSCA 相关材料与复习计划。"),
+        (14, "NORMAL", "距离{label}还有14天", "请确认报名/考试安排是否就绪。"),
+        (7, "HIGH", "CSCA 节点仅剩7天：{label}", "建议完成本周备考与材料核对。"),
+        (3, "HIGH", "CSCA 进入最后3天：{label}", "请立即确认状态与行程。"),
+        (1, "CRITICAL", "明天是 CSCA 节点：{label}", "请马上确认是否已完成对应事项。"),
+        (0, "CRITICAL", "今天是 CSCA 节点：{label}", "请确认结果，如有问题联系顾问。"),
+    ]
+    rows: list[NotificationRule] = []
+    for et in CSCA_EVENT_TYPES:
+        for days, prio, title, body in ladder:
+            key = (et, days, ROLE_STUDENT)
+            if key in existing:
+                continue
+            rows.append(NotificationRule(
+                event_type=et, days_before=days, enabled=True,
+                recipient_type=ROLE_STUDENT, priority=prio,
+                title_template=title, body_template=body, category=CATEGORY_TIMELINE,
+            ))
+            existing.add(key)
+    if rows:
+        db.add_all(rows)
+        db.commit()
+    return len(rows)
+
+
 def rules_for(db: Session, event_type: str, recipient_type: str) -> list[NotificationRule]:
     return (
         db.query(NotificationRule)
@@ -116,6 +150,7 @@ def generate_for_timeline_item(
     commit: bool = True,
 ) -> list[Notification]:
     _ = today
+    ensure_csca_rules(db)
     if not item.deadline:
         return []
     if item.status in COMPLETED_TIMELINE_STATUSES:
@@ -138,7 +173,7 @@ def generate_for_timeline_item(
                 category=CATEGORY_TIMELINE,
             )
             for d in DEFAULT_DEADLINE_LADDER
-            if event_type == "APPLICATION_DEADLINE" or d <= 14
+            if event_type == "APPLICATION_DEADLINE" or event_type in CSCA_EVENT_TYPES or d <= 14
         ]
 
     for rule in student_rules:

@@ -18,6 +18,7 @@ from .schemas import (
 from .services.security import get_current_user
 from .services.student_portrait import StudentPortraitService
 from .services.student_profile_entitlements import student_profile_entitlements
+from .services.csca import CSCA_STATUSES, CSCA_STATUS_LABELS, csca_card, sync_csca_timeline
 from .services.student_profile import (
     SECTIONS,
     apply_eligibility_result,
@@ -274,6 +275,8 @@ def student_meta():
         "eligibility_statuses": ELIGIBILITY_STATUSES,
         "section_notes": SECTION_NOTES,
         "sections": SECTIONS,
+        "csca_statuses": CSCA_STATUSES,
+        "csca_status_labels": CSCA_STATUS_LABELS,
     }
 
 
@@ -335,8 +338,24 @@ def patch_section(
     profile = merge_section(_decrypt_row(row), section, payload.data or {})
     if section == "basic_info" and (profile["basic_info"].get("chinese_name") or profile["basic_info"].get("english_name")):
         profile["wizard_completed"] = profile.get("wizard_completed") or False
+    if section == "csca":
+        from .services.csca import normalize_csca, _now_iso
+        profile["csca"] = normalize_csca(profile.get("csca") or {})
+        profile["csca"]["updated_at"] = _now_iso()
     _save_row(db, row, profile)
-    return _payload(row, profile, db)
+    if section == "csca":
+        sync_csca_timeline(
+            db,
+            student_id=row.id,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            csca=profile.get("csca") or {},
+            commit=True,
+        )
+    out = _payload(row, profile, db)
+    if section == "csca":
+        out["csca_card"] = csca_card(profile.get("csca"))
+    return out
 
 
 @router.post("/{student_id}/complete-wizard")
@@ -444,6 +463,27 @@ def _parse_optional_date(value: str | None):
         return date.fromisoformat(text[:10])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"日期格式无效: {value}") from exc
+
+
+@router.get("/{student_id}/csca")
+def get_csca(student_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """CSCA exam center payload. Dates never invented."""
+    row = _owned(db, user, student_id)
+    profile = _decrypt_row(row)
+    card = csca_card(profile.get("csca"))
+    return {
+        "student_id": row.id,
+        "csca": profile.get("csca") or {},
+        "card": card,
+        "prep_checklist": [
+            "确认本人护照/证件信息是否与报名一致",
+            "查阅官方报名通道与考场须知（以官方公布为准）",
+            "准备考试当日证件与文具",
+            "关注成绩发布渠道（仅当官方/后台/本人录入日期后才提醒）",
+        ],
+        "related_reminders_note": "仅在存在真实日期时，按 T-30/14/7/3/1/0 生成提醒；无真实日期不生成。",
+        "fake_date_allowed": False,
+    }
 
 
 @router.post("/{student_id}/timeline/manual")

@@ -17,9 +17,43 @@
             <el-tab-pane label="身份/国籍"><pre class="gq-pre">{{ pretty(data.sections.identity) }}</pre></el-tab-pane>
             <el-tab-pane label="教育背景"><pre class="gq-pre">{{ pretty(data.sections.education) }}</pre></el-tab-pane>
             <el-tab-pane label="语言成绩"><pre class="gq-pre">{{ pretty(data.sections.language_exams) }}</pre></el-tab-pane>
+            <el-tab-pane label="CSCA考试"><pre class="gq-pre">{{ pretty(data.csca_card || data.sections.csca) }}</pre></el-tab-pane>
             <el-tab-pane label="目标大学/专业"><pre class="gq-pre">{{ pretty(data.sections.goals) }}</pre></el-tab-pane>
           </el-tabs>
         </section>
+        
+        <section class="gq-panel block" v-if="data.csca_card || data.sections?.csca">
+          <h3>CSCA 考试</h3>
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="状态">{{ data.csca_card?.csca_status_label || data.sections?.csca?.csca_status || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="报名截止">{{ data.csca_card?.csca_registration_deadline || '待官方公布' }}</el-descriptions-item>
+            <el-descriptions-item label="考试日期">{{ data.csca_card?.csca_exam_date || '待官方公布' }}</el-descriptions-item>
+            <el-descriptions-item label="成绩发布">{{ data.csca_card?.csca_result_date || '待官方公布' }}</el-descriptions-item>
+            <el-descriptions-item label="成绩">{{ data.csca_card?.csca_score || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="等级">{{ data.csca_card?.csca_level || data.sections?.csca?.csca_level || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="备注">{{ data.csca_card?.csca_notes || data.sections?.csca?.csca_notes || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="日期来源">
+              报名={{ data.csca_card?.registration_deadline_source || data.sections?.csca?.registration_deadline_source || '—' }}
+              · 考试={{ data.csca_card?.exam_date_source || data.sections?.csca?.exam_date_source || '—' }}
+              · 成绩={{ data.csca_card?.result_date_source || data.sections?.csca?.result_date_source || '—' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="最近更新">{{ data.csca_card?.updated_at || data.sections?.csca?.updated_at || '—' }}</el-descriptions-item>
+          </el-descriptions>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <el-select v-model="cscaForm.csca_status" placeholder="状态" style="width:160px">
+              <el-option v-for="o in cscaStatuses" :key="o.value" :label="o.label" :value="o.value" />
+            </el-select>
+            <el-input v-model="cscaForm.csca_registration_deadline" placeholder="报名截止 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_exam_date" placeholder="考试日期 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_result_date" placeholder="成绩发布 YYYY-MM-DD" style="width:180px" />
+            <el-input v-model="cscaForm.csca_score" placeholder="成绩" style="width:120px" />
+            <el-input v-model="cscaForm.csca_level" placeholder="等级" style="width:120px" />
+            <el-input v-model="cscaForm.csca_notes" placeholder="备注" style="width:200px" />
+            <el-button type="primary" size="small" :loading="cscaSaving" @click="saveCsca">协助更新（审计）</el-button>
+          </div>
+          <p class="gq-muted" style="margin-top:6px">仅可填写真实日期；留空表示待官方公布。禁止编造。</p>
+        </section>
+
         <section class="gq-panel block">
           <h3>资格结果</h3>
           <el-alert
@@ -130,6 +164,23 @@ const activeDraft = ref(null)
 const editContent = ref('')
 const generating = ref('')
 const msg = ref('')
+const cscaSaving = ref(false)
+const cscaForm = ref({
+  csca_status: 'NOT_PLANNED',
+  csca_registration_deadline: '',
+  csca_exam_date: '',
+  csca_result_date: '',
+  csca_score: '',
+  csca_level: '',
+  csca_notes: '',
+})
+const cscaStatuses = [
+  { value: 'NOT_PLANNED', label: '未计划' },
+  { value: 'PLANNED', label: '计划参加' },
+  { value: 'REGISTERED', label: '已报名' },
+  { value: 'TAKEN', label: '已考试' },
+  { value: 'RESULT_AVAILABLE', label: '成绩已出' },
+]
 
 const history = computed(() => drafts.value || [])
 const canEdit = computed(() => ['DRAFT', 'REVIEWED'].includes(activeDraft.value?.status))
@@ -146,9 +197,49 @@ function statusType(s) {
   return ''
 }
 
+function syncCscaFormFromData() {
+  const c = data.value?.sections?.csca || data.value?.csca_card || {}
+  cscaForm.value = {
+    csca_status: c.csca_status || 'NOT_PLANNED',
+    csca_registration_deadline: c.csca_registration_deadline_raw || c.csca_registration_deadline || '',
+    csca_exam_date: c.csca_exam_date_raw || c.csca_exam_date || '',
+    csca_result_date: c.csca_result_date_raw || c.csca_result_date || '',
+    csca_score: c.csca_score || '',
+    csca_level: c.csca_level || '',
+    csca_notes: c.csca_notes || '',
+  }
+  // Clear pending-official display strings from inputs
+  for (const k of ['csca_registration_deadline', 'csca_exam_date', 'csca_result_date']) {
+    if (cscaForm.value[k] === '待官方公布') cscaForm.value[k] = ''
+  }
+}
+
+async function saveCsca() {
+  cscaSaving.value = true
+  try {
+    const payload = {}
+    for (const [k, v] of Object.entries(cscaForm.value)) {
+      if (v !== '' && v != null) payload[k] = v
+    }
+    const res = await api.patchStudentCsca(props.studentId, payload)
+    ElMessage.success('CSCA 已协助更新（已记审计）')
+    data.value = {
+      ...data.value,
+      sections: { ...(data.value.sections || {}), csca: res.csca },
+      csca_card: res.csca_card,
+    }
+    syncCscaFormFromData()
+  } catch (e) {
+    ElMessage.error(e.message || 'CSCA 更新失败')
+  } finally {
+    cscaSaving.value = false
+  }
+}
+
 async function load() {
   data.value = await api.student360(props.studentId)
   kinds.value = data.value.report_kinds || {}
+  syncCscaFormFromData()
   await refreshDrafts()
 }
 
