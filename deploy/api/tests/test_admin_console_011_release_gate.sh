@@ -65,6 +65,11 @@ if [[ -f "$SCR" ]]; then
     && ok "SCRIPT_SAFETY_STRINGS" || ko "SCRIPT_SAFETY_STRINGS"
   grep -qE ':5432/' "$SCR" && grep -q 'refuse\|BLOCKED\|abort' "$SCR" \
     && ok "SCRIPT_REFUSES_5432" || ko "SCRIPT_REFUSES_5432"
+  grep -q 'OLD_010_GATE_NOT_USED_FOR_011_APPLY=YES' "$SCR" \
+    && grep -q 'CHECKPOINT_D_DIAGNOSTIC=PASS' "$SCR" \
+    && grep -q 'ALLOW_011_UPGRADE' "$SCR" \
+    && ! grep -q 'ALLOW_010_UPGRADE' "$SCR" \
+    && ok "SCRIPT_INDEPENDENT_011_GATE" || ko "SCRIPT_INDEPENDENT_011_GATE"
 else
   ko "missing production release script"
 fi
