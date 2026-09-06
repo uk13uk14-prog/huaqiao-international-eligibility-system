@@ -46,9 +46,12 @@
       <div>
         <!-- Basic -->
         <section class="gq-panel block">
-          <h3>基本资料 / 所属用户</h3>
-          <p v-if="canEditProfile" class="gq-muted" style="margin:0 0 10px">仅超级管理员可修改并保存学生姓名与基本资料。</p>
-          <el-form v-if="canEditProfile" :model="basicForm" label-width="96px" class="basic-form">
+          <h3 class="basic-h">
+            基本资料 / 所属用户
+            <el-button v-if="canEditProfile && !basicEditing" size="small" type="primary" @click="startEditBasic">编辑</el-button>
+          </h3>
+          <p v-if="canEditProfile && basicEditing" class="gq-muted" style="margin:0 0 10px">仅超级管理员可修改并保存学生姓名与基本资料。</p>
+          <el-form v-if="canEditProfile && basicEditing" :model="basicForm" label-width="96px" class="basic-form">
             <div class="basic-grid">
               <el-form-item label="中文姓名">
                 <el-input v-model="basicForm.chinese_name" maxlength="80" placeholder="学生中文姓名，勿填邮箱" />
@@ -80,9 +83,10 @@
                 <el-input v-model="basicForm.intended_entry_year" maxlength="4" placeholder="2027" />
               </el-form-item>
             </div>
+            <el-button @click="cancelEditBasic">取消</el-button>
             <el-button type="primary" :loading="basicSaving" @click="saveBasic">保存基本资料</el-button>
           </el-form>
-          <el-descriptions :column="2" border size="small" :class="{ 'mt-desc': canEditProfile }">
+          <el-descriptions v-if="!basicEditing" :column="2" border size="small">
             <el-descriptions-item label="学生姓名">{{ human(basic.chinese_name || displayName) }}</el-descriptions-item>
             <el-descriptions-item label="英文名">{{ human(basic.english_name) }}</el-descriptions-item>
             <el-descriptions-item label="出生日期">{{ humanDate(basic.birth_date) }}</el-descriptions-item>
@@ -351,6 +355,8 @@ import {
   humanDate,
   humanDateTime,
   pick,
+  identityPairLabel,
+  planCodeLabel,
   cscaStatusLabel,
   riskLabel,
   riskTagType,
@@ -367,6 +373,7 @@ const props = defineProps({ studentId: { type: [String, Number], required: true 
 const isDev = import.meta.env.DEV
 const { can } = useAdminSession()
 const canEditProfile = computed(() => can('student360.profile.write'))
+const basicEditing = ref(false)
 const basicSaving = ref(false)
 const basicForm = ref({
   chinese_name: '',
@@ -435,12 +442,7 @@ const displayName = computed(() => {
   if (!raw || String(raw).includes('@')) return EMPTY.name
   return human(raw, EMPTY.name)
 })
-const planLabel = computed(() => {
-  const code = owner.value.plan_code
-  if (!code) return EMPTY.pending
-  if (owner.value.is_paid && !String(code).toLowerCase().includes('trial')) return `${code}（付费）`
-  return String(code)
-})
+const planLabel = computed(() => planCodeLabel(owner.value.plan_code, { isPaid: owner.value.is_paid }))
 const trialLabel = computed(() => {
   const t = owner.value.trial || {}
   if (t.trial_active) return '试用中'
@@ -451,7 +453,7 @@ const trialLabel = computed(() => {
 const identityRoute = computed(() => {
   const intl = identity.value.international?.status
   const hq = identity.value.huaqiao?.status
-  if (intl || hq) return [intl && `国际生:${intl}`, hq && `华侨生:${hq}`].filter(Boolean).join(' · ')
+  if (intl || hq) return identityPairLabel(intl, hq, '')
   return null
 })
 const identityRiskHint = computed(() => {
@@ -543,6 +545,15 @@ function statusType(s) {
   return ''
 }
 
+function startEditBasic() {
+  syncBasicForm()
+  basicEditing.value = true
+}
+function cancelEditBasic() {
+  basicEditing.value = false
+  syncBasicForm()
+}
+
 function syncBasicForm() {
   const b = data.value?.sections?.basic_info || {}
   basicForm.value = {
@@ -572,6 +583,7 @@ async function saveBasic() {
   try {
     await api.patchStudentBasic(props.studentId, { ...basicForm.value })
     ElMessage.success('学生基本资料已保存')
+    basicEditing.value = false
     await load()
   } catch (e) {
     ElMessage.error(e.message || '保存失败')
@@ -754,8 +766,8 @@ watch(() => props.studentId, load)
 .ops-cell .k { font-size: 12px; color: #64748b; }
 .ops-cell .v { font-size: 14px; font-weight: 600; color: #142033; word-break: break-word; }
 .ops-actions, .row-edit { display: flex; flex-wrap: wrap; gap: 8px; }
+.basic-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .basic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-.mt-desc { margin-top: 14px; }
 .basic-form :deep(.el-form-item) { margin-bottom: 12px; }
 .elig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .elig-card { border: 1px solid #d5dde8; border-radius: 10px; padding: 12px; background: #fff; }

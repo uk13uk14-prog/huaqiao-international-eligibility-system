@@ -97,6 +97,8 @@ import {
   EMPTY,
   human,
   humanDateTime,
+  identityPairLabel,
+  identityStatusLabel,
   riskLabel,
   riskTagType,
 } from '../utils/opsDisplay'
@@ -140,9 +142,8 @@ function identityLabel(row) {
   if (track) return human(track)
   const intl = row.summary?.international_status
   const hq = row.summary?.huaqiao_status
-  if (intl && intl !== 'NOT_ASSESSED') return `国际生:${intl}`
-  if (hq && hq !== 'NOT_ASSESSED') return `华侨生:${hq}`
-  return EMPTY.pending
+  if (intl || hq) return identityPairLabel(intl, hq)
+  return identityStatusLabel(intl, EMPTY.pending)
 }
 function go(row) { router.push(`/students/${row.id}`) }
 async function openName(row) {
