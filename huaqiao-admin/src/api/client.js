@@ -103,6 +103,8 @@ export const api = {
     }),
   patchStudentCrm: (id, data) =>
     request(`/api/admin/v1/students/${id}/crm`, { method: 'PATCH', body: JSON.stringify(data) }),
+  patchStudentBasic: (id, data) =>
+    request(`/api/admin/v1/students/${id}/profile-basic`, { method: 'PATCH', body: JSON.stringify(data) }),
   followUps: (id) => request(`/api/admin/v1/students/${id}/follow-ups`),
   createFollowUp: (id, data) =>
     request(`/api/admin/v1/students/${id}/follow-ups`, { method: 'POST', body: JSON.stringify(data) }),

@@ -67,6 +67,23 @@
       <el-tab-pane label="档案" name="profile">
         <section class="gq-panel block">
           <h3>基本资料</h3>
+          <p v-if="canEditProfile" class="gq-muted">仅超级管理员可修改并保存学生姓名与基本资料。</p>
+          <div v-if="canEditProfile" class="basic-edit">
+            <el-input v-model="basicForm.chinese_name" maxlength="80" placeholder="中文姓名" />
+            <el-input v-model="basicForm.english_name" maxlength="80" placeholder="英文名" />
+            <el-input v-model="basicForm.birth_date" maxlength="10" placeholder="出生日期 YYYY-MM-DD" />
+            <el-select v-model="basicForm.gender" clearable placeholder="性别">
+              <el-option label="男" value="男" />
+              <el-option label="女" value="女" />
+              <el-option label="其他" value="其他" />
+              <el-option label="未说明" value="未说明" />
+            </el-select>
+            <el-input v-model="basicForm.current_country" maxlength="80" placeholder="当前国家" />
+            <el-input v-model="basicForm.current_city" maxlength="80" placeholder="当前城市" />
+            <el-input v-model="basicForm.contact" maxlength="80" placeholder="联系方式" />
+            <el-input v-model="basicForm.intended_entry_year" maxlength="4" placeholder="入学年份" />
+            <el-button type="primary" :loading="basicSaving" style="width:100%" @click="saveBasic">保存基本资料</el-button>
+          </div>
           <dl class="dl">
             <div><dt>学生姓名</dt><dd>{{ human(basic.chinese_name || displayName) }}</dd></div>
             <div><dt>英文名</dt><dd>{{ human(basic.english_name) }}</dd></div>
@@ -203,6 +220,7 @@
 import { computed, onMounted, ref, toRef } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
+import { useAdminSession } from '../composables/useAdminSession'
 import { useStudentAi } from '../composables/useStudentAi'
 import MobileBottomSheet from './MobileBottomSheet.vue'
 import {
@@ -225,6 +243,19 @@ import {
 } from '../utils/opsDisplay'
 
 const props = defineProps({ studentId: { type: [String, Number], required: true } })
+const { can } = useAdminSession()
+const canEditProfile = computed(() => can('student360.profile.write'))
+const basicSaving = ref(false)
+const basicForm = ref({
+  chinese_name: '',
+  english_name: '',
+  birth_date: '',
+  gender: '',
+  current_country: '',
+  current_city: '',
+  contact: '',
+  intended_entry_year: '',
+})
 const data = ref(null)
 const error = ref('')
 const tab = ref('overview')
@@ -309,6 +340,44 @@ function openDraft(d) {
   sheetOpen.value = true
 }
 
+function syncBasicForm() {
+  const b = data.value?.sections?.basic_info || {}
+  basicForm.value = {
+    chinese_name: b.chinese_name || '',
+    english_name: b.english_name || '',
+    birth_date: String(b.birth_date || '').slice(0, 10),
+    gender: b.gender || '',
+    current_country: b.current_country || '',
+    current_city: b.current_city || '',
+    contact: b.contact || '',
+    intended_entry_year: b.intended_entry_year || '',
+  }
+}
+
+async function saveBasic() {
+  if (!canEditProfile.value) {
+    ElMessage.error('仅超级管理员可修改学生姓名与基本资料')
+    return
+  }
+  const cn = String(basicForm.value.chinese_name || '')
+  const en = String(basicForm.value.english_name || '')
+  if (cn.includes('@') || en.includes('@')) {
+    ElMessage.error('姓名不能使用邮箱')
+    return
+  }
+  basicSaving.value = true
+  try {
+    await api.patchStudentBasic(props.studentId, { ...basicForm.value })
+    ElMessage.success('学生基本资料已保存')
+    data.value = await api.student360(props.studentId)
+    syncBasicForm()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    basicSaving.value = false
+  }
+}
+
 async function saveFollowUp() {
   if (!followContent.value.trim()) return
   try {
@@ -329,6 +398,7 @@ async function saveFollowUp() {
 onMounted(async () => {
   try {
     data.value = await api.student360(props.studentId)
+    syncBasicForm()
     await bootstrap(data.value.report_kinds)
   } catch (e) {
     error.value = e.message || '加载失败'
@@ -390,4 +460,5 @@ onMounted(async () => {
   overflow: auto;
 }
 .follow-form { margin-bottom: 12px; }
+.basic-edit { display: grid; gap: 8px; margin: 0 0 12px; }
 </style>

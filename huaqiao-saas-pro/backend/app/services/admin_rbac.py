@@ -31,6 +31,7 @@ ALL_CAPABILITIES = frozenset(
         "students.assign",
         "student360.read",
         "student360.write",
+        "student360.profile.write",
         "followups.read",
         "followups.write",
         "consultations.read",

@@ -61,19 +61,38 @@
       <el-table-column label="最近更新时间" width="160">
         <template #default="{ row }">{{ humanDateTime(row.updated_at, EMPTY.none) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      <el-table-column label="操作" width="170" fixed="right">
         <template #default="{ row }">
+          <el-button v-if="canEditName" link type="primary" @click.stop="openName(row)">改姓名</el-button>
           <el-button link type="primary" @click.stop="go(row)">进入360</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog v-model="nameOpen" title="修改学生姓名" width="420px" destroy-on-close>
+      <p class="gq-muted" style="margin:0 0 12px">仅超级管理员可保存。勿把邮箱当作学生姓名。</p>
+      <el-form :model="nameForm" label-width="88px">
+        <el-form-item label="中文姓名">
+          <el-input v-model="nameForm.chinese_name" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="英文名">
+          <el-input v-model="nameForm.english_name" maxlength="80" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="nameOpen = false">取消</el-button>
+        <el-button type="primary" :loading="nameSaving" @click="saveName">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
+import { useAdminSession } from '../composables/useAdminSession'
 import {
   EMPTY,
   human,
@@ -83,6 +102,12 @@ import {
 } from '../utils/opsDisplay'
 
 const router = useRouter()
+const { can } = useAdminSession()
+const canEditName = computed(() => can('student360.profile.write'))
+const nameOpen = ref(false)
+const nameSaving = ref(false)
+const nameTarget = ref(null)
+const nameForm = ref({ chinese_name: '', english_name: '' })
 const students = ref([])
 const staff = ref([])
 const stageLabels = ref({})
@@ -120,6 +145,46 @@ function identityLabel(row) {
   return EMPTY.pending
 }
 function go(row) { router.push(`/students/${row.id}`) }
+async function openName(row) {
+  nameTarget.value = row
+  nameSaving.value = false
+  try {
+    const d = await api.student360(row.id)
+    const b = d.sections?.basic_info || {}
+    nameForm.value = { chinese_name: b.chinese_name || '', english_name: b.english_name || '' }
+  } catch {
+    const shown = displayName(row)
+    nameForm.value = { chinese_name: shown === '待补姓名' ? '' : shown, english_name: '' }
+  }
+  nameOpen.value = true
+}
+async function saveName() {
+  if (!nameTarget.value || !canEditName.value) return
+  const cn = String(nameForm.value.chinese_name || '')
+  const en = String(nameForm.value.english_name || '')
+  if (cn.includes('@') || en.includes('@')) {
+    ElMessage.error('姓名不能使用邮箱')
+    return
+  }
+  if (!cn.trim() && !en.trim()) {
+    ElMessage.error('请至少填写中文姓名或英文名')
+    return
+  }
+  nameSaving.value = true
+  try {
+    await api.patchStudentBasic(nameTarget.value.id, {
+      chinese_name: cn.trim(),
+      english_name: en.trim(),
+    })
+    ElMessage.success('学生姓名已保存')
+    nameOpen.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    nameSaving.value = false
+  }
+}
 async function load() {
   const data = await api.students({
     q: q.value || undefined,
