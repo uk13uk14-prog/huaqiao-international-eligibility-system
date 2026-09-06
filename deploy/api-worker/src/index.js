@@ -1,7 +1,11 @@
 const ALLOWED = new Set([
   'https://app.guoqiaoplan.com',
+  'https://admin.guoqiaoplan.com',
   'https://huaqiao-international-eligibility-system.rambolluk.workers.dev',
 ]);
+
+/** Public API hostname expected by named tunnel ingress */
+const PUBLIC_API_HOST = 'api.guoqiaoplan.com';
 
 function corsHeaders(origin) {
   const o = ALLOWED.has(origin) ? origin : '';
@@ -24,10 +28,21 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
+    if (!env.BACKEND_ORIGIN) {
+      return new Response('BACKEND_ORIGIN not configured', {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain', ...corsHeaders(origin) },
+      });
+    }
     const url = new URL(request.url);
+    const backend = new URL(env.BACKEND_ORIGIN);
     const target = new URL(url.pathname + url.search, env.BACKEND_ORIGIN);
     const headers = new Headers(request.headers);
     headers.delete('host');
+    // Named tunnel ingress matches hostname api.guoqiaoplan.com only.
+    if (backend.hostname.endsWith('.cfargotunnel.com')) {
+      headers.set('Host', PUBLIC_API_HOST);
+    }
     const init = {
       method: request.method,
       headers,
