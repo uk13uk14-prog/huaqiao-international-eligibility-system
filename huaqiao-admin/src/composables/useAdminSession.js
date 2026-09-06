@@ -1,18 +1,23 @@
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
+import {
+  canCapability,
+  permissionsFor,
+  resolveConsoleRole,
+} from '../utils/adminCapabilities'
 
 const me = ref(null)
 const loaded = ref(false)
 
 export function useAdminSession() {
-  const role = computed(() => me.value?.console_role || '')
-  const permissions = computed(() => me.value?.permissions || [])
+  const role = computed(() => resolveConsoleRole(me.value))
+  const permissions = computed(() => permissionsFor(me.value))
   const menu = computed(() => me.value?.menu || [])
   const user = computed(() => me.value?.user || {})
   const mustChange = computed(() => !!me.value?.must_change_password)
 
   function can(cap) {
-    return permissions.value.includes(cap)
+    return canCapability(me.value, cap)
   }
 
   async function refresh() {

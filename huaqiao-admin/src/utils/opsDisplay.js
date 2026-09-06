@@ -27,6 +27,47 @@ export function isBlank(v) {
   return false
 }
 
+const ENUM_ZH = {
+  NOT_ASSESSED: '待评估',
+  pro_trial: '7天 Pro 体验',
+  PRO_TRIAL: '7天 Pro 体验',
+  'pro-trial': '7天 Pro 体验',
+}
+
+export function humanizeEnumText(text) {
+  let s = String(text ?? '')
+  if (!s) return s
+  s = s.replace(/pro[_-]?trial/gi, '7天 Pro 体验')
+  s = s.replace(/NOT_ASSESSED/gi, '待评估')
+  s = s.replace(/国际生\s*:/g, '国际生：')
+  s = s.replace(/华侨生\s*:/g, '华侨生：')
+  return s
+}
+
+export function identityStatusLabel(status, fallback = '待评估') {
+  if (isBlank(status)) return fallback
+  const key = String(status).trim()
+  if (/^NOT_ASSESSED$/i.test(key)) return '待评估'
+  return humanizeEnumText(human(key, fallback))
+}
+
+export function identityPairLabel(intl, hq, fallback = EMPTY.pending) {
+  const parts = []
+  if (!isBlank(intl)) parts.push(`国际生：${identityStatusLabel(intl)}`)
+  if (!isBlank(hq)) parts.push(`华侨生：${identityStatusLabel(hq)}`)
+  return parts.join(' · ') || fallback
+}
+
+export function planCodeLabel(code, extras = {}) {
+  const raw = String(code || '').trim()
+  if (!raw) return extras.fallback || EMPTY.pending
+  if (/^pro[_-]?trial$/i.test(raw)) return '7天 Pro 体验'
+  const mapped = ENUM_ZH[raw] || ENUM_ZH[raw.toUpperCase()] || ENUM_ZH[raw.toLowerCase()]
+  if (mapped) return mapped
+  if (extras.isPaid && !raw.toLowerCase().includes('trial')) return `${humanizeEnumText(raw)}（付费）`
+  return humanizeEnumText(raw)
+}
+
 export function human(v, fallback = EMPTY.pending) {
   if (typeof v === 'boolean') return v ? '是' : '否'
   if (isBlank(v)) return fallback
@@ -35,7 +76,10 @@ export function human(v, fallback = EMPTY.pending) {
   if (PLACEHOLDERS.has(s)) return fallback
   if (s === 'true') return '是'
   if (s === 'false') return '否'
-  return s
+  if (ENUM_ZH[s] || ENUM_ZH[s.toUpperCase()] || ENUM_ZH[s.toLowerCase()]) {
+    return ENUM_ZH[s] || ENUM_ZH[s.toUpperCase()] || ENUM_ZH[s.toLowerCase()]
+  }
+  return humanizeEnumText(s)
 }
 
 export function humanBool(v, fallback = EMPTY.pending) {
@@ -105,10 +149,13 @@ export function riskTagType(level) {
 }
 
 export function eligibilityBadge(conclusion, qualified) {
-  const text = String(conclusion || '').trim()
+  const text = humanizeEnumText(String(conclusion || '').trim())
   if (qualified === true) return { label: text || '符合', type: 'success' }
   if (qualified === false) return { label: text || '不符合', type: 'danger' }
   if (!text) return { label: EMPTY.judge, type: 'info' }
+  if (/^待评估$/i.test(text) || /^NOT_ASSESSED$/i.test(String(conclusion || ''))) {
+    return { label: '待评估', type: 'info' }
+  }
   if (/不符合|不合格/.test(text)) return { label: text, type: 'danger' }
   if (/需补|待补|材料|可能|待定/.test(text)) return { label: text, type: 'warning' }
   if (/符合|通过|合格/.test(text)) return { label: text, type: 'success' }

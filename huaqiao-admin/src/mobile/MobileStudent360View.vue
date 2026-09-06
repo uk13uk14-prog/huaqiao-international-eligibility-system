@@ -66,9 +66,12 @@
 
       <el-tab-pane label="档案" name="profile">
         <section class="gq-panel block">
-          <h3>基本资料</h3>
-          <p v-if="canEditProfile" class="gq-muted">仅超级管理员可修改并保存学生姓名与基本资料。</p>
-          <div v-if="canEditProfile" class="basic-edit">
+          <h3 class="basic-h">
+            基本资料
+            <el-button v-if="canEditProfile && !basicEditing" size="small" type="primary" @click="startEditBasic">编辑基本资料</el-button>
+          </h3>
+          <p v-if="canEditProfile && basicEditing" class="gq-muted">仅超级管理员可修改并保存学生姓名与基本资料。</p>
+          <div v-if="canEditProfile && basicEditing" class="basic-edit">
             <el-input v-model="basicForm.chinese_name" maxlength="80" placeholder="中文姓名" />
             <el-input v-model="basicForm.english_name" maxlength="80" placeholder="英文名" />
             <el-input v-model="basicForm.birth_date" maxlength="10" placeholder="出生日期 YYYY-MM-DD" />
@@ -82,9 +85,10 @@
             <el-input v-model="basicForm.current_city" maxlength="80" placeholder="当前城市" />
             <el-input v-model="basicForm.contact" maxlength="80" placeholder="联系方式" />
             <el-input v-model="basicForm.intended_entry_year" maxlength="4" placeholder="入学年份" />
+            <el-button @click="cancelEditBasic">取消</el-button>
             <el-button type="primary" :loading="basicSaving" style="width:100%" @click="saveBasic">保存基本资料</el-button>
           </div>
-          <dl class="dl">
+          <dl v-if="!basicEditing" class="dl">
             <div><dt>学生姓名</dt><dd>{{ human(basic.chinese_name || displayName) }}</dd></div>
             <div><dt>英文名</dt><dd>{{ human(basic.english_name) }}</dd></div>
             <div><dt>出生日期</dt><dd>{{ humanDate(basic.birth_date) }}</dd></div>
@@ -230,6 +234,8 @@ import {
   humanDate,
   humanDateTime,
   pick,
+  identityPairLabel,
+  planCodeLabel,
   cscaStatusLabel,
   riskLabel,
   riskTagType,
@@ -245,6 +251,7 @@ import {
 const props = defineProps({ studentId: { type: [String, Number], required: true } })
 const { can } = useAdminSession()
 const canEditProfile = computed(() => can('student360.profile.write'))
+const basicEditing = ref(false)
 const basicSaving = ref(false)
 const basicForm = ref({
   chinese_name: '',
@@ -288,12 +295,7 @@ const displayName = computed(() => {
   if (!raw || String(raw).includes('@')) return EMPTY.name
   return human(raw, EMPTY.name)
 })
-const planLabel = computed(() => {
-  const code = owner.value.plan_code
-  if (!code) return EMPTY.pending
-  if (owner.value.is_paid && !String(code).toLowerCase().includes('trial')) return `${code}（付费）`
-  return String(code)
-})
+const planLabel = computed(() => planCodeLabel(owner.value.plan_code, { isPaid: owner.value.is_paid }))
 const trialLabel = computed(() => {
   const t = owner.value.trial || {}
   if (t.trial_active) return '试用中'
@@ -304,7 +306,7 @@ const trialLabel = computed(() => {
 const identityRoute = computed(() => {
   const intl = identity.value.international?.status
   const hq = identity.value.huaqiao?.status
-  if (intl || hq) return [intl && `国际生:${intl}`, hq && `华侨生:${hq}`].filter(Boolean).join(' · ')
+  if (intl || hq) return identityPairLabel(intl, hq, '')
   return null
 })
 const eligIntl = computed(() => eligibilityBadge(data.value?.eligibility?.international?.conclusion, data.value?.eligibility?.international?.qualified))
@@ -340,6 +342,15 @@ function openDraft(d) {
   sheetOpen.value = true
 }
 
+function startEditBasic() {
+  syncBasicForm()
+  basicEditing.value = true
+}
+function cancelEditBasic() {
+  basicEditing.value = false
+  syncBasicForm()
+}
+
 function syncBasicForm() {
   const b = data.value?.sections?.basic_info || {}
   basicForm.value = {
@@ -369,6 +380,7 @@ async function saveBasic() {
   try {
     await api.patchStudentBasic(props.studentId, { ...basicForm.value })
     ElMessage.success('学生基本资料已保存')
+    basicEditing.value = false
     data.value = await api.student360(props.studentId)
     syncBasicForm()
   } catch (e) {
@@ -460,5 +472,6 @@ onMounted(async () => {
   overflow: auto;
 }
 .follow-form { margin-bottom: 12px; }
+.basic-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .basic-edit { display: grid; gap: 8px; margin: 0 0 12px; }
 </style>

@@ -206,6 +206,19 @@ def test_staff_customer_separation_and_rbac(client):
     assert fu.status_code == 200
 
 
+def test_legacy_admin_maps_super_admin_profile_write():
+    from types import SimpleNamespace
+
+    from app.services.admin_rbac import AdminConsoleRole, has_capability, resolve_console_role
+
+    legacy = SimpleNamespace(role="admin", is_active=True, account_kind="STAFF")
+    assert resolve_console_role(legacy) == AdminConsoleRole.SUPER_ADMIN
+    assert has_capability(legacy, "student360.profile.write") is True
+    for role in ("operations_admin", "consultant", "support"):
+        other = SimpleNamespace(role=role, is_active=True, account_kind="STAFF")
+        assert has_capability(other, "student360.profile.write") is False
+
+
 def test_student_create_endpoint_fallback(client):
     """If profile create path name differs, still keep admin login regression."""
     h = _admin_headers(client)

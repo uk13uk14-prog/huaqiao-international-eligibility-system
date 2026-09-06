@@ -1,7 +1,7 @@
 <template>
   <div v-if="data">
     <h1 class="page-title">用户详情 #{{ data.user.id }}</h1>
-    <p class="page-sub gq-muted">{{ data.user.email }} · {{ data.user.plan_code }} · Trial {{ data.user.trial?.trial_status }}</p>
+    <p class="page-sub gq-muted">{{ data.user.email }} · {{ planCodeLabel(data.user.plan_code, { isPaid: data.user.is_paid }) }} · {{ human(data.user.trial?.trial_status, '—') }}</p>
     <div class="gq-panel">
       <h3>名下学生</h3>
       <el-table :data="data.students" @row-click="goStudent" style="cursor:pointer">
@@ -44,6 +44,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/client'
 import { useAdminSession } from '../composables/useAdminSession'
+import { human, planCodeLabel } from '../utils/opsDisplay'
 
 const props = defineProps({ userId: { type: [String, Number], required: true } })
 const router = useRouter()
