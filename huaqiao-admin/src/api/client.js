@@ -1,0 +1,181 @@
+const TOKEN_KEY = 'guoqiao_admin_token'
+
+/** API base from env — production builds must embed https://api.guoqiaoplan.com via .env.production */
+const API_BASE = (import.meta.env.VITE_ADMIN_API_BASE || '').replace(/\/$/, '')
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
+}
+
+export function setToken(token) {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+function url(path) {
+  if (!API_BASE) return path
+  return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = 'unknown' } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+async function request(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  }
+  const token = getToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  let res
+  try {
+    res = await fetch(url(path), { ...options, headers })
+  } catch (e) {
+    throw new ApiError('无法连接服务器，请稍后重试', {
+      status: 0,
+      code: 'network',
+      cause: e,
+    })
+  }
+
+  const text = await res.text()
+  let data = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = { detail: text }
+  }
+
+  if (!res.ok) {
+    const detail = data?.detail
+    const detailStr = typeof detail === 'string' ? detail : null
+    if (res.status === 401) {
+      throw new ApiError('邮箱或密码错误', { status: 401, code: 'unauthorized' })
+    }
+    if (res.status === 403) {
+      throw new ApiError('当前账号无权进入运营后台', { status: 403, code: 'forbidden' })
+    }
+    const msg =
+      detailStr ||
+      (typeof detail === 'object' && detail ? `请求失败（HTTP ${res.status}）` : null) ||
+      `请求失败（HTTP ${res.status}）`
+    throw new ApiError(msg, { status: res.status, code: 'http' })
+  }
+  return data
+}
+
+export const api = {
+  apiBase: API_BASE || '(same-origin / vite proxy)',
+  login: (email, password) =>
+    request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  me: () => request('/api/admin/v1/me'),
+  dashboard: () => request('/api/admin/v1/dashboard'),
+  users: (q) => request(`/api/admin/v1/users${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  user: (id) => request(`/api/admin/v1/users/${id}`),
+  students: (params = {}) => {
+    const q = new URLSearchParams()
+    if (typeof params === 'string') {
+      if (params) q.set('q', params)
+    } else {
+      Object.entries(params || {}).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+      })
+    }
+    const qs = q.toString()
+    return request(`/api/admin/v1/students${qs ? `?${qs}` : ''}`)
+  },
+  staff: () => request('/api/admin/v1/staff'),
+  student360: (id) => request(`/api/admin/v1/students/${id}`),
+  assignStudent: (id, assignee_user_id) =>
+    request(`/api/admin/v1/students/${id}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ assignee_user_id }),
+    }),
+  patchStudentCrm: (id, data) =>
+    request(`/api/admin/v1/students/${id}/crm`, { method: 'PATCH', body: JSON.stringify(data) }),
+  patchStudentBasic: (id, data) =>
+    request(`/api/admin/v1/students/${id}/profile-basic`, { method: 'PATCH', body: JSON.stringify(data) }),
+  followUps: (id) => request(`/api/admin/v1/students/${id}/follow-ups`),
+  createFollowUp: (id, data) =>
+    request(`/api/admin/v1/students/${id}/follow-ups`, { method: 'POST', body: JSON.stringify(data) }),
+  aiFollowUpDrafts: (id) =>
+    request(`/api/admin/v1/students/${id}/ai-follow-up-drafts`, { method: 'POST', body: '{}' }),
+  patchStudentCsca: (id, data) => request(`/api/admin/v1/students/${id}/csca`, { method: 'PATCH', body: JSON.stringify(data) }),
+  studentTimeline: (id) => request(`/api/admin/v1/students/${id}/timeline`),
+  studentEligibility: (id) => request(`/api/admin/v1/students/${id}/eligibility`),
+  studentConsultations: (id) => request(`/api/admin/v1/students/${id}/consultations`),
+  aiDrafts: (id) => request(`/api/admin/v1/students/${id}/ai-drafts`),
+  aiGenerate: (id, report_kind, submit_review = false) =>
+    request(`/api/admin/v1/students/${id}/ai-drafts`, {
+      method: 'POST',
+      body: JSON.stringify({ report_kind, submit_review }),
+    }),
+  aiEdit: (id, draftId, content, submit_review = true) =>
+    request(`/api/admin/v1/students/${id}/ai-drafts/${draftId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content, submit_review }),
+    }),
+  aiApprove: (id, draftId) =>
+    request(`/api/admin/v1/students/${id}/ai-drafts/${draftId}/approve`, { method: 'POST' }),
+  aiPublish: (id, draftId) =>
+    request(`/api/admin/v1/students/${id}/ai-drafts/${draftId}/publish`, { method: 'POST' }),
+  settings: () => request('/api/admin/v1/settings'),
+  nav: () => request('/api/admin/v1/nav'),
+  employees: (params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+    })
+    const qs = q.toString()
+    return request(`/api/admin/v1/employees${qs ? `?${qs}` : ''}`)
+  },
+  employee: (id) => request(`/api/admin/v1/employees/${id}`),
+  createEmployee: (data) =>
+    request('/api/admin/v1/employees', { method: 'POST', body: JSON.stringify(data) }),
+  patchEmployee: (id, data) =>
+    request(`/api/admin/v1/employees/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  disableEmployee: (id) =>
+    request(`/api/admin/v1/employees/${id}/disable`, { method: 'POST' }),
+  enableEmployee: (id) =>
+    request(`/api/admin/v1/employees/${id}/enable`, { method: 'POST' }),
+  resetEmployeePassword: (id, password) =>
+    request(`/api/admin/v1/employees/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+  changeOwnPassword: (password) =>
+    request('/api/admin/v1/me/password', { method: 'POST', body: JSON.stringify({ password }) }),
+  consultants: () => request('/api/admin/v1/consultants'),
+  consultant360: (id) => request(`/api/admin/v1/consultants/${id}`),
+  followUpCenter: (bucket = 'today') =>
+    request(`/api/admin/v1/follow-up-center?bucket=${encodeURIComponent(bucket)}`),
+  auditEvents: (action) =>
+    request(`/api/admin/v1/audit-events${action ? `?action=${encodeURIComponent(action)}` : ''}`),
+  rbacCatalog: () => request('/api/admin/v1/rbac'),
+  consultations: () => request('/api/admin/expert-consultations'),
+  notifications: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.unread_only) q.set('unread_only', '1')
+    if (params.pending_only) q.set('pending_only', '1')
+    if (params.priority) q.set('priority', params.priority)
+    const qs = q.toString()
+    return request(`/api/admin/v1/notifications${qs ? `?${qs}` : ''}`)
+  },
+  notificationPopups: () => request('/api/admin/v1/notifications/popups'),
+  notificationRead: (id) =>
+    request(`/api/admin/v1/notifications/${id}/read`, { method: 'POST' }),
+  notificationPopupShown: (id) =>
+    request(`/api/admin/v1/notifications/${id}/popup-shown`, { method: 'POST' }),
+  notificationSchedulerTick: () =>
+    request('/api/admin/v1/notifications/scheduler/tick', { method: 'POST' }),
+}

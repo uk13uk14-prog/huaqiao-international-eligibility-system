@@ -70,6 +70,7 @@ export function setAccessibleStudents(list) {
 
 /**
  * Set active student by id. Does not fetch profile data.
+ * Does NOT mutate / shrink accessibleStudents — list and active id stay separate.
  * Returns true if the id is accepted (belongs to accessible list, or list empty and id forced).
  */
 export function setActiveStudentId(id, { allowUnknown = false } = {}) {
@@ -83,9 +84,22 @@ export function setActiveStudentId(id, { allowUnknown = false } = {}) {
   if (!allowUnknown && ids.length && !ids.includes(nid)) {
     return false
   }
+  // No-op success when already active — callers may still reload context.
+  if (normalizeStudentId(activeStudentId.value) === nid) {
+    persistActiveStudentId(nid)
+    return true
+  }
   activeStudentId.value = nid
   persistActiveStudentId(nid)
   return true
+}
+
+/**
+ * Switch active student by stable student_id.
+ * Preserves the full accessibleStudents list (bidirectional A↔B).
+ */
+export function switchActiveStudent(id, options = {}) {
+  return setActiveStudentId(id, options)
 }
 
 /**
@@ -150,6 +164,11 @@ export function clearActiveStudent() {
 
 export const activeStudentLabel = computed(() => studentLabel(accessibleStudents.value, activeStudentId.value))
 export const hasMultipleStudents = computed(() => accessibleStudents.value.length > 1)
+/** Other students available to switch to (excludes current). List source stays accessibleStudents. */
+export const switchableStudents = computed(() => {
+  const cur = normalizeStudentId(activeStudentId.value)
+  return accessibleStudents.value.filter((s) => normalizeStudentId(s.id) !== cur)
+})
 
 export function useActiveStudent() {
   return {
@@ -157,8 +176,10 @@ export function useActiveStudent() {
     accessibleStudents,
     activeStudentLabel,
     hasMultipleStudents,
+    switchableStudents,
     setAccessibleStudents,
     setActiveStudentId,
+    switchActiveStudent,
     syncStudentsAndActive,
     loadForActiveStudent,
     beginStudentLoad,

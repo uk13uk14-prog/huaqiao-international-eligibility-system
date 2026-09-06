@@ -28,6 +28,11 @@ class User(Base):
     student_profile_limit_override = Column(Integer, nullable=True)  # account-level seat override
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Admin Console V2 staff profile — additive; customers stay CUSTOMER
+    account_kind = Column(String(20), default="CUSTOMER", index=True)  # CUSTOMER | STAFF
+    job_title = Column(String(80), default="")
+    last_login_at = Column(DateTime, nullable=True)
+    must_change_password = Column(Boolean, default=False)
     tenant = relationship("Tenant", back_populates="users")
 
 
@@ -104,6 +109,8 @@ class EligibilityRecord(Base):
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    # Phase 3 / draft 007: nullable until backfill; new writes should set student_id.
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
     eligibility_type = Column(String(30), index=True, nullable=False)
     qualified = Column(Boolean, nullable=False)
     conclusion = Column(String(200), nullable=False)
@@ -174,6 +181,32 @@ class StudentMasterProfile(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     archived_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
+    # CRM V1 (migration 010) — operational fields; never put assignee only in cipher JSON
+    assignee_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    assigned_at = Column(DateTime, nullable=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    crm_stage = Column(String(40), default="UNASSIGNED", index=True)
+    risk_level = Column(String(20), default="NONE")
+    next_action = Column(Text, default="")
+    next_follow_up_at = Column(DateTime, nullable=True, index=True)
+    last_follow_up_at = Column(DateTime, nullable=True)
+    identity_track = Column(String(40), default="")
+
+
+class StudentFollowUp(Base):
+    """CRM follow-up / activity log. AI_ASSISTED must never pretend to be HUMAN."""
+    __tablename__ = "student_follow_ups"
+    id = Column(Integer, primary_key=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=False)
+    operator_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    operator_type = Column(String(20), default="STAFF")  # ADMIN | STAFF | SYSTEM
+    source = Column(String(20), default="HUMAN")  # HUMAN | AI_ASSISTED | SYSTEM
+    type = Column(String(40), default="NOTE")
+    content = Column(Text, default="")
+    summary = Column(String(240), default="")
+    next_action = Column(Text, nullable=True)
+    next_follow_up_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class StudentTimelineItem(Base):
@@ -202,20 +235,28 @@ class StudentTimelineItem(Base):
 
 
 class ExpertConsultation(Base):
-    """一对一专家咨询：付费提交 → 系统自动生成初稿 → 人工审核下发。"""
+    """一对一专家咨询 / Admin AI Expert：DRAFT → REVIEWED → APPROVED → PUBLISHED。"""
     __tablename__ = "expert_consultations"
     id = Column(Integer, primary_key=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    # Admin AI Expert V1 — required for safe multi-student isolation on new writes.
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    assigned_consultant_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     title = Column(String(200), default="")
     question = Column(Text, default="")
     personalization = Column(Text, default="")
     contact_phone = Column(String(40), default="")
     contact_email = Column(String(160), default="")
     contact_wechat = Column(String(80), default="")
+    # Legacy: pending_ai/draft_ready/published; Admin V1: DRAFT/REVIEWED/APPROVED/PUBLISHED/ARCHIVED
     status = Column(String(30), default="pending_ai", index=True)
+    report_kind = Column(String(60), default="", index=True)
+    ai_provider = Column(String(40), default="")
     ai_draft = Column(Text, default="")
     ai_model = Column(String(120), default="")
+    # Structured AI payload JSON (summary/risk_items/...) — never contains full ID/passport.
+    payload_json = Column(Text, default="{}")
     final_report = Column(Text, default="")
     admin_note = Column(Text, default="")
     reviewed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -230,8 +271,22 @@ class ConsultationReportVersion(Base):
     consultation_id = Column(Integer, ForeignKey("expert_consultations.id"), index=True, nullable=False)
     version_no = Column(Integer, default=1)
     content = Column(Text, default="")
+    # ai | ai_draft | edited | approved | published | admin_edit (legacy)
     source = Column(String(30), default="ai")
     editor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AuditEvent(Base):
+    """Durable admin/privacy audit (replaces in-memory-only AuditLogger for Admin V1)."""
+    __tablename__ = "audit_events"
+    id = Column(Integer, primary_key=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    action = Column(String(80), nullable=False, index=True)
+    resource_type = Column(String(80), nullable=False, default="")
+    resource_id = Column(String(120), nullable=True)
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    metadata_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
@@ -249,3 +304,76 @@ class MemberTimelineReminder(Base):
     admin_note = Column(Text, default="")
     created_by_role = Column(String(20), default="system")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
+# ---------------------------------------------------------------------------
+# Notification Center V1
+# ---------------------------------------------------------------------------
+
+class Notification(Base):
+    """Unified in-app notification (student + admin). Push is provider-abstracted."""
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    recipient_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    recipient_role = Column(String(30), nullable=False, index=True)  # STUDENT_SIDE | ADMIN_SIDE
+    student_id = Column(Integer, ForeignKey("student_master_profiles.id"), index=True, nullable=True)
+    category = Column(String(40), default="timeline", index=True)
+    event_type = Column(String(60), nullable=False, index=True)
+    title = Column(String(240), nullable=False, default="")
+    body = Column(Text, default="")
+    source_type = Column(String(40), default="")
+    source_id = Column(String(120), default="")
+    scheduled_at = Column(DateTime, index=True, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    read_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="SCHEDULED", index=True)
+    priority = Column(String(20), default="NORMAL", index=True)  # LOW|NORMAL|HIGH|CRITICAL
+    action_url = Column(String(400), default="")
+    action_label = Column(String(80), default="")
+    dedupe_key = Column(String(240), default="", index=True)
+    popup_shown_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NotificationRule(Base):
+    __tablename__ = "notification_rules"
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(60), nullable=False, index=True)
+    days_before = Column(Integer, nullable=True)
+    hours_before = Column(Integer, nullable=True)
+    enabled = Column(Boolean, default=True, index=True)
+    recipient_type = Column(String(30), nullable=False, default="STUDENT_SIDE", index=True)
+    priority = Column(String(20), default="NORMAL")
+    title_template = Column(String(240), default="")
+    body_template = Column(Text, default="")
+    category = Column(String(40), default="timeline")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificationDevice(Base):
+    __tablename__ = "notification_devices"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    device_type = Column(String(40), default="web")
+    platform = Column(String(40), default="")
+    push_provider = Column(String(20), default="IN_APP")
+    push_token_encrypted = Column(Text, default="")
+    enabled = Column(Boolean, default=True, index=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    timeline_enabled = Column(Boolean, default=True)
+    expert_enabled = Column(Boolean, default=True)
+    account_enabled = Column(Boolean, default=True)
+    quiet_hours_start = Column(String(8), default="22:00")
+    quiet_hours_end = Column(String(8), default="08:00")
+    timezone = Column(String(64), default="Asia/Shanghai")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -69,6 +69,7 @@ SECTION_NOTES = {
     "identity": "identity_notes",
     "planning": "planning_notes",
     "summary": "summary_notes",
+    "csca": "csca_notes",
 }
 
 SECTIONS = list(SECTION_NOTES.keys())
@@ -209,6 +210,12 @@ def empty_eligibility_card() -> dict[str, Any]:
     }
 
 
+
+def _empty_csca_section() -> dict[str, Any]:
+    from .csca import empty_csca
+    return empty_csca()
+
+
 def empty_profile() -> dict[str, Any]:
     current = empty_school(is_current=True)
     return {
@@ -274,6 +281,7 @@ def empty_profile() -> dict[str, Any]:
         "summary": {
             "summary_notes": "",
         },
+        "csca": _empty_csca_section(),
         "legacy": {},
     }
 
@@ -498,6 +506,9 @@ def normalize_profile(raw: dict | None) -> dict[str, Any]:
                 targets.append(row)
             merged["targets"] = targets
             merged["goals_notes"] = incoming.get("goals_notes", merged["goals_notes"])
+        elif section == "csca":
+            from .csca import normalize_csca
+            merged = normalize_csca({**merged, **incoming})
         elif section == "identity":
             for key in list(merged.keys()):
                 if key in ("international", "huaqiao"):
@@ -702,12 +713,31 @@ def profile_summary(profile: dict) -> dict[str, Any]:
         "target_universities": [t.get("university_name") for t in targets if t.get("university_name")],
         "priority_counts": counts,
         "completeness": completeness(p),
+        "csca_status": (p.get("csca") or {}).get("csca_status") or "NOT_PLANNED",
+        "csca_score": (p.get("csca") or {}).get("csca_score") or "",
     }
 
 
 def display_name_of(profile: dict) -> str:
+    """Canonical student name for denormalized student_master_profiles.display_name.
+
+    Priority: chinese_name → english_name → preferred_name/legal_name aliases → 未命名学生.
+    Never uses account email. Never invents a name.
+    """
     p = normalize_profile(profile)
-    return p["basic_info"].get("chinese_name") or p["basic_info"].get("english_name") or "未命名学生"
+    basic = p.get("basic_info") or {}
+    for key in (
+        "chinese_name",
+        "english_name",
+        "preferred_name",
+        "legal_name",
+        "full_name",
+        "name",
+    ):
+        val = str(basic.get(key) or "").strip()
+        if val and "@" not in val:
+            return val
+    return "未命名学生"
 
 
 def judge_prefills(profile: dict) -> dict[str, Any]:

@@ -14,7 +14,8 @@ config = context.config
 # Prefer explicit DATABASE_URL so CI/freeze can run sqlite upgrade tests.
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+    # ConfigParser treats '%' as interpolation — URL-encoded passwords must use '%%'.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 elif not config.get_main_option("sqlalchemy.url", "").startswith("postgresql"):
     config.set_main_option(
         "sqlalchemy.url",

@@ -1,0 +1,14 @@
+{
+  "appId": "com.guoqiao.admin",
+  "appName": "国侨运营后台",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#eef2f7"
+    }
+  }
+}

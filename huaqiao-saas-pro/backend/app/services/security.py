@@ -8,6 +8,20 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import AuthToken, User
 from ..config import get_settings
+from .membership_trial import (
+    ALL_MEMBERSHIP_PLANS,
+    LEGACY_TEST_PAID_PLANS,
+    TRIAL_DAYS,
+    TRIAL_PLAN_CODE,
+    VIP_PAID_PLANS,
+    has_smart_timeline,
+    is_paid,
+    is_pro,
+    trial_info,
+)
+
+# Back-compat alias used by older tests / docs
+PAID_PLANS = LEGACY_TEST_PAID_PLANS | VIP_PAID_PLANS | {TRIAL_PLAN_CODE} | {"lifetime"}
 
 
 def hash_password(password: str) -> str:
@@ -40,13 +54,24 @@ def create_token(db: Session, user: User) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
+        "role": user.role or "",
+        "account_kind": getattr(user, "account_kind", None) or "",
         "iat": now,
         "exp": now + timedelta(minutes=120),
         "jti": secrets.token_urlsafe(16),
     }
+    try:
+        from .admin_rbac import resolve_console_role
+        console = resolve_console_role(user)
+        payload["console_role"] = console.value if console else None
+    except Exception:
+        payload["console_role"] = None
+    # Do not embed the capability catalog — it overflows auth_tokens.token (varchar 512).
+    # Frontend reads permissions from /api/admin/v1/me; backend re-computes RBAC per request.
     token = jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
-    # Store in AuthToken table for revocation support
-    db.add(AuthToken(user_id=user.id, token=token))
+    # auth_tokens.token is varchar(512). Persist a hash when the JWT is longer.
+    stored = token if len(token) <= 500 else hashlib.sha256(token.encode("utf-8")).hexdigest()
+    db.add(AuthToken(user_id=user.id, token=stored))
     db.commit()
     return token
 
@@ -76,27 +101,6 @@ def get_current_user(authorization: str = Header(""), db: Session = Depends(get_
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在或已停用")
     return user
-
-
-# ============================================================
-# 权限判断辅助函数
-# ============================================================
-
-PAID_PLANS = {"pro_monthly", "pro_yearly", "pro_plus_yearly"}
-
-
-def is_paid(user) -> bool:
-    """判断用户是否为付费用户"""
-    if not user or not user.plan_code:
-        return False
-    return user.plan_code in PAID_PLANS
-
-
-def has_smart_timeline(user) -> bool:
-    """判断用户是否拥有智能时间线功能（pro_plus_yearly 专属）"""
-    if not user or not user.plan_code:
-        return False
-    return user.plan_code == "pro_plus_yearly"
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

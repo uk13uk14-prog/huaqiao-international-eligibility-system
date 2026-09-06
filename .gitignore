@@ -5,7 +5,10 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.production
+!**/.env.production
 !.env.production.example
+!**/.env.production.example
 
 *.db
 *.sqlite
@@ -15,6 +18,14 @@ venv/
 *.key
 *secret*
 !*.example
+# Allow committed ops tooling / docs (filename contains "secret")
+!deploy/api/m1-runtime-secret-discover.sh
+!deploy/api/m1-runtime-secret-restore.sh
+!deploy/api/m1-runtime-secret-bootstrap-and-go-live.sh
+!deploy/api/RUNTIME_SECRET_RECOVERY.md
+!deploy/api/RUNTIME_SECRET_BOOTSTRAP.md
+!deploy/api/tests/test_runtime_secret_safety.sh
+!deploy/api/tests/test_runtime_secret_bootstrap_safety.sh
 
 # IDE
 .idea/

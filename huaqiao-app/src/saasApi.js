@@ -29,7 +29,11 @@ async function saasRequest(path, options = {}) {
       err.detail = detail
       throw err
     } catch (e) {
-      if (e instanceof SyntaxError) throw new Error(text || `SaaS请求失败：${response.status}`)
+      if (e instanceof SyntaxError) {
+        const err = new Error(text || `SaaS请求失败：${response.status}`)
+        err.status = response.status
+        throw err
+      }
       throw e
     }
   }
@@ -81,6 +85,7 @@ export const saasApi = {
   students: () => saasRequest('/api/students'),
   createStudent: (data) => saasRequest('/api/students', { method: 'POST', body: JSON.stringify(data || {}) }),
   student: (id) => saasRequest(`/api/students/${id}`),
+  studentCsca: (id) => saasRequest(`/api/students/${id}/csca`),
   patchStudentSection: (id, section, data) =>
     saasRequest(`/api/students/${id}/sections/${section}`, { method: 'PATCH', body: JSON.stringify({ data }) }),
   completeStudentWizard: (id) => saasRequest(`/api/students/${id}/complete-wizard`, { method: 'POST', body: '{}' }),
@@ -102,7 +107,26 @@ export const saasApi = {
 
   expertDetail: (id) => saasRequest(`/api/expert/consultations/${id}`),
 
+  publishedConsultations: (studentId) =>
+    saasRequest(`/api/students/${studentId}/published-consultations`),
+
   reminders: () => saasRequest('/api/member/reminders'),
+
+  notifications: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.unread_only) q.set('unread_only', '1')
+    if (params.category) q.set('category', params.category)
+    const qs = q.toString()
+    return saasRequest(`/api/notifications${qs ? `?${qs}` : ''}`)
+  },
+  notificationUnreadCount: () => saasRequest('/api/notifications/unread-count'),
+  notificationPopups: () => saasRequest('/api/notifications/popups'),
+  notificationRead: (id) => saasRequest(`/api/notifications/${id}/read`, { method: 'POST', body: '{}' }),
+  notificationPopupShown: (id) =>
+    saasRequest(`/api/notifications/${id}/popup-shown`, { method: 'POST', body: '{}' }),
+  notificationPrefs: () => saasRequest('/api/notifications/preferences'),
+  updateNotificationPrefs: (data) =>
+    saasRequest('/api/notifications/preferences', { method: 'PUT', body: JSON.stringify(data) }),
 
   askAssistant: (question, context = '', mode = 'qa') =>
     saasRequest('/api/assistant/ask', { method: 'POST', body: JSON.stringify({ question, context, mode }) }),

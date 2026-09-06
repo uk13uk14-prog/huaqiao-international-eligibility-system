@@ -1,5 +1,7 @@
 <template>
-  <div :class="['mobile-app', darkMode ? 'dark' : 'light']">
+  <div v-if="!authReady" class="auth-boot">正在恢复登录状态…</div>
+  <AuthGate v-else-if="!saasUser" :dark-mode="darkMode" @authenticated="onAuthSuccess" />
+  <div v-else :class="['mobile-app', darkMode ? 'dark' : 'light']">
     <van-nav-bar
       :title="navTitle"
       fixed
@@ -9,32 +11,70 @@
       @click-left="goBack"
     >
       <template #right>
+        <button
+          v-if="tab === 'home'"
+          type="button"
+          class="notif-bell"
+          aria-label="通知中心"
+          @click="openNotifications"
+        >
+          🔔
+          <span v-if="notifUnread > 0" class="notif-badge">{{ notifUnread > 99 ? '99+' : notifUnread }}</span>
+        </button>
         <van-switch v-model="darkMode" size="22px" @change="persistTheme" />
       </template>
     </van-nav-bar>
 
     <main class="screen" @touchstart="touchStart" @touchend="touchEnd">
+      <section v-if="tab === 'notifications'" class="flow-screen notif-screen">
+        <van-tabs v-model:active="notifTab">
+          <van-tab title="重要" name="important" />
+          <van-tab title="时间线" name="timeline" />
+          <van-tab title="规划" name="expert" />
+          <van-tab title="账户" name="account" />
+        </van-tabs>
+        <div v-if="notifLoading" class="pad muted">加载中…</div>
+        <van-empty v-else-if="!filteredNotifs.length" description="暂无通知" />
+        <van-cell-group v-else inset>
+          <van-cell
+            v-for="n in filteredNotifs"
+            :key="n.id"
+            :title="n.title"
+            :label="n.body"
+            :value="n.unread ? '未读' : ''"
+            is-link
+            @click="openNotifItem(n)"
+          />
+        </van-cell-group>
+      </section>
+
       <section v-if="tab === 'home'" class="home-screen">
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <div class="hero-card">
-          <h1>国际生/华侨生资格判定系统</h1>
+          <h1 class="hero-title">
+            <span class="hero-title-line hero-title-line--primary">国际生/华侨生</span>
+            <span class="hero-title-line hero-title-line--secondary">资格判定系统</span>
+          </h1>
           <p class="hero-lead">欢迎使用</p>
         </div>
-        <van-cell-group v-if="accessibleStudents.length" inset class="home-student-switch">
-          <van-cell title="当前学生" :value="activeStudentLabel" />
+        <van-cell-group v-if="studentSwitcherList.length" inset class="home-student-switch">
+          <van-cell title="当前学生" :value="currentStudentLabel" />
           <van-field
-            v-if="hasMultipleStudents"
+            v-if="studentSwitcherList.length > 1"
             label="切换"
             is-link
             readonly
-            :model-value="activeStudentLabel"
+            :model-value="currentStudentLabel"
             placeholder="选择学生"
-            @click="showHomeStudentPicker = true"
+            @click="openHomeStudentPicker"
           />
         </van-cell-group>
-        <van-popup v-model:show="showHomeStudentPicker" position="bottom">
+        <van-popup v-model:show="showHomeStudentPicker" position="bottom" round>
           <van-picker
+            v-if="showHomeStudentPicker"
+            :key="`home-picker-${currentStudentId || 'none'}-${pickerEpoch}`"
             :columns="homeStudentColumns"
-            :default-index="homePickerDefaultIndex"
+            :model-value="homePickerSelectedValues"
             @confirm="onHomePickStudent"
             @cancel="showHomeStudentPicker=false"
           />
@@ -47,6 +87,7 @@
           <van-grid-item icon="description" text="教外函政策" @click="openLawsPolicy" />
           <van-grid-item icon="wap-home-o" text="大学库" @click="openPage('universities')" />
           <van-grid-item icon="underway-o" text="招生时间" @click="openPage('schedule')" />
+          <van-grid-item icon="edit" text="CSCA考试" @click="openPage('csca')" />
           <van-grid-item icon="records-o" text="历史记录" @click="openPage('history')" />
           <van-grid-item icon="vip-card-o" text="会员中心" @click="openPage('member')" />
           <van-grid-item icon="service-o" text="一对一规划咨询" @click="openConsultWithGate" />
@@ -185,6 +226,10 @@
         <StudentProfile @goto-judge="onGotoJudgeFromProfile" @goto-member="openPage('member')" />
       </section>
 
+      <section v-if="tab === 'csca'" class="list-screen">
+        <CscaExamCenter @goto-profile="openPage('profile')" @goto-timeline="openPage('profile')" />
+      </section>
+
       <section v-if="tab === 'laws'" class="list-screen laws-screen">
         <van-search v-model="lawKeyword" placeholder="搜索国籍法/教外函政策" @search="loadLaws" @clear="loadLaws" />
         <div id="law-nationality-anchor" class="laws-anchor" aria-hidden="true" />
@@ -213,38 +258,120 @@
       </section>
 
       <section v-if="tab === 'universities'" class="list-screen">
-        <van-dropdown-menu>
-          <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChange" />
-          <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
-          <van-dropdown-item v-model="featureFilter" :options="featureOptions" @change="loadUniversities" />
-        </van-dropdown-menu>
-        <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
-        <div class="card-list">
-          <van-empty v-if="!universities.length" description="暂无院校数据，可调整筛选或稍后重试" />
-          <article v-for="school in universities" :key="school.id" class="school-card">
-            <div class="school-title"><b>#{{ school.ranking }} {{ school.name }}</b><van-tag>{{ school.province }}</van-tag></div>
-            <p>{{ formatTags(school) }}</p>
-            <p><b>领域：</b>{{ school.fields }}</p>
-            <p><b>优势专业：</b>{{ school.advantage_majors }}</p>
-            <p>{{ school.description }}</p>
-            <p><b>招生办：</b>{{ school.admissions_office || '以学校官方发布为准' }}</p>
-            <p><b>邮箱：</b>{{ school.admission_email || '以学校官方发布为准' }}</p>
-            <p><b>电话：</b>{{ school.admission_phone || '以学校官方发布为准' }}</p>
-            <van-button size="small" type="primary" plain :url="school.admission_url || school.official_url">招生官网</van-button>
-          </article>
+        <div class="univ-toolbar">
+          <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
+          <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
+            <div class="mf-cell">
+              <span class="mf-label">身份</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">排序</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="univSort" :options="univSortMenuOptions" @change="onUnivBrowseChange" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">地区</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell">
+              <span class="mf-label">院校类型</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
+            <div class="mf-cell mf-cell-wide">
+              <span class="mf-label">专业</span>
+              <van-dropdown-menu class="mf-menu">
+                <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
+              </van-dropdown-menu>
+            </div>
+          </div>
+          <p class="univ-count">显示 {{ browsedUniversities.length }} / API {{ universities.length }} 所</p>
+          <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
+        </div>
+        <div class="univ-layout">
+          <div ref="univListEl" class="univ-list" @scroll.passive="onUnivListScroll">
+            <van-empty v-if="!browsedUniversities.length" description="暂无匹配院校，可调整搜索或筛选" />
+            <article
+              v-for="school in browsedUniversities"
+              :key="school.id"
+              :data-az="pinyinInitial(school.name)"
+              class="univ-card"
+            >
+              <div class="univ-card-head">
+                <b>#{{ school.ranking }} {{ school.name }}</b>
+                <van-tag plain type="primary">{{ school.province }}</van-tag>
+              </div>
+              <p class="univ-card-meta">{{ formatTags(school) }} · {{ school.fields || '综合' }}</p>
+              <p class="univ-card-majors"><b>优势专业：</b>{{ school.advantage_majors || '—' }}</p>
+              <van-button size="mini" plain type="primary" @click="toggleUnivExpand(school.id)">{{ expandedUnivIds[school.id] ? '收起详情' : '查看详情' }}</van-button>
+              <div v-if="expandedUnivIds[school.id]" class="univ-card-detail">
+                <p>{{ school.description || '暂无简介' }}</p>
+                <p><b>招生办：</b>{{ school.admissions_office || '以学校官方发布为准' }}</p>
+                <p><b>邮箱：</b>{{ school.admission_email || '以学校官方发布为准' }}</p>
+                <p><b>电话：</b>{{ school.admission_phone || '以学校官方发布为准' }}</p>
+                <van-button size="small" type="primary" plain :url="school.admission_url || school.official_url">招生官网</van-button>
+              </div>
+            </article>
+          </div>
+          <nav
+            class="univ-az"
+            :class="{ 'is-active': azIndexActive }"
+            aria-label="拼音首字母索引"
+            @touchstart.passive="pulseAzIndex"
+          >
+            <button
+              v-for="letter in azIndexLetters"
+              :key="letter"
+              type="button"
+              class="univ-az-btn"
+              :class="{ 'is-empty': !univAzPresent.has(letter) }"
+              @click="onAzLetterClick(letter)"
+            >{{ letter }}</button>
+          </nav>
         </div>
       </section>
 
       <section v-if="tab === 'schedule'" class="list-screen">
-        <van-dropdown-menu>
-          <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
-          <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
-          <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
-        </van-dropdown-menu>
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
+        <div class="mf-grid mf-grid-schedule" role="toolbar" aria-label="招生时间轴筛选">
+          <div class="mf-cell">
+            <span class="mf-label">身份</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">月份</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">地区</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell">
+            <span class="mf-label">层级</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+          <div class="mf-cell mf-cell-wide">
+            <span class="mf-label">特色</span>
+            <van-dropdown-menu class="mf-menu">
+              <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
+            </van-dropdown-menu>
+          </div>
+        </div>
         <van-empty v-if="!schedules.length" description="暂无招生时间轴数据，可调整筛选或稍后重试" />
         <div v-else class="card-list">
           <article v-for="item in schedules" :key="item.id || `${item.university_name}-${item.year}-${item.month}`" class="school-card">
@@ -269,18 +396,29 @@
       </section>
 
       <section v-if="tab === 'member'" class="list-screen member-screen">
-        <van-cell-group v-if="!saasUser" inset title="登录 SaaS 会员">
+        <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
+        <van-cell-group v-if="!saasUser" inset title="登录 / 注册 SaaS 会员">
           <van-field v-model="loginEmail" label="邮箱" placeholder="注册邮箱" />
           <van-field v-model="loginPassword" type="password" label="密码" placeholder="密码" />
           <div class="consult-actions" style="padding:12px;">
             <van-button block round type="primary" :loading="saasBusy" @click="doSaasLogin">登录</van-button>
+            <van-button block round plain type="primary" style="margin-top:8px;" :loading="saasBusy" @click="doSaasRegister">注册并开启 7 天 Pro 体验</van-button>
           </div>
         </van-cell-group>
         <van-cell-group v-else inset :title="'您好，' + (saasUser.name || saasUser.email)">
+          <van-cell title="姓名" :value="saasUser.name || '—'" />
+          <van-cell title="邮箱" :value="saasUser.email || '—'" />
           <van-cell title="当前套餐" :value="saasUser.plan_code + (saasUser.paid ? '（在期）' : '')" />
+          <van-cell v-if="saasUser.trial_active" title="7天 Pro 试用中" :value="'剩余 ' + (saasUser.trial_days_remaining ?? '—') + ' 天'" />
+          <van-cell v-else-if="saasUser.trial_status === 'EXPIRED'" title="体验状态" value="已结束 · 数据已保留" />
+          <van-cell v-if="saasUser.membership_until" title="到期时间" :value="String(saasUser.membership_until).slice(0, 19).replace('T', ' ')" />
           <van-cell title="全量院校库" :value="saasUser.features?.full_elite_university_library ? '已开通' : '未开通'" />
           <van-cell title="专家咨询" :value="saasUser.features?.one_on_one_expert ? '已开通' : '未开通'" />
           <van-cell title="智能时间轴" :value="saasUser.features?.full_timeline_reminders ? '已开通' : '年/三年会员'" />
+          <div v-if="saasUser.trial_status === 'EXPIRED'" class="consult-actions" style="padding:12px;">
+            <p class="trial-expired-copy">7 天完整体验已结束。你的学生档案和规划数据已安全保留。</p>
+            <van-button block round type="primary" @click="scrollToPlans">升级 Pro，继续查看完整规划</van-button>
+          </div>
           <div class="consult-actions" style="padding:12px;">
             <van-button block round type="danger" @click="doSaasLogout">退出登录</van-button>
           </div>
@@ -319,6 +457,55 @@
           <van-cell v-for="c in expertList" :key="c.id" :title="c.title || '咨询'" :label="expertStatusLabel(c.status)" is-link @click="openExpertDetail(c.id)" />
         </van-cell-group>
         <van-empty v-else-if="saasUser" description="开通会员后可提交专家工单" />
+
+        <van-divider>专家规划</van-divider>
+        <van-cell-group v-if="saasUser && currentStudentId" inset>
+          <van-cell
+            v-for="p in publishedPlans"
+            :key="p.id"
+            :title="planTitle(p)"
+            :label="planSubtitle(p)"
+            is-link
+            @click="openPublishedPlan(p)"
+          >
+            <template #value>
+              <van-tag type="success">已发布</van-tag>
+            </template>
+          </van-cell>
+          <van-empty v-if="!publishedPlans.length" description="暂无已发布的专家规划" />
+        </van-cell-group>
+        <van-empty v-else-if="saasUser && !currentStudentId" description="请先选择学生档案后查看专家规划" />
+
+        <van-popup v-model:show="publishedPlanShow" round position="bottom" :style="{ height: '75%' }">
+          <div class="consult-sheet" v-if="publishedPlanDetail">
+            <h3>{{ planTitle(publishedPlanDetail) }}</h3>
+            <p class="gq-muted">状态：已发布 · {{ publishedPlanDetail.published_at || '—' }}</p>
+            <van-divider>摘要</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.summary || '—' }}</p>
+            <van-divider>风险点</van-divider>
+            <ul v-if="(publishedPlanDetail.risk_items || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.risk_items" :key="'r'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>选校策略</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.school_strategy || '—' }}</p>
+            <van-divider>材料缺口</van-divider>
+            <ul v-if="(publishedPlanDetail.material_gaps || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.material_gaps" :key="'g'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>时间行动</van-divider>
+            <ul v-if="(publishedPlanDetail.timeline_actions || []).length">
+              <li v-for="(x, i) in publishedPlanDetail.timeline_actions" :key="'t'+i">{{ x }}</li>
+            </ul>
+            <p v-else>—</p>
+            <van-divider>家长沟通要点</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.parent_message || '—' }}</p>
+            <van-divider>正文</van-divider>
+            <p style="white-space:pre-wrap;">{{ publishedPlanDetail.content || '—' }}</p>
+            <van-button block round style="margin-top:12px" @click="publishedPlanShow = false">关闭</van-button>
+          </div>
+        </van-popup>
 
         <van-divider v-if="saasUser?.features?.full_timeline_reminders">升学节点提醒</van-divider>
         <van-cell-group v-if="saasUser?.features?.full_timeline_reminders" inset>
@@ -379,27 +566,35 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { showFailToast, showLoadingToast, showSuccessToast } from 'vant'
+import { showDialog, showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
 import {
   accessibleStudents,
   activeStudentId,
   activeStudentLabel,
   clearActiveStudent,
-  hasMultipleStudents,
   normalizeStudentId,
   setActiveStudentId,
+  switchActiveStudent,
   syncStudentsAndActive,
 } from './activeStudent'
 import { api } from './api'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
+import AuthGate from './AuthGate.vue'
+import { normalizeSaasUser } from './authSession.js'
+import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
+import CscaExamCenter from './CscaExamCenter.vue'
 
 const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
 
 const tab = ref('home')
 const historyStack = ref(['home'])
 const darkMode = ref(localStorage.getItem('mobile-theme') === 'dark')
+const notifUnread = ref(0)
+const notifTab = ref('important')
+const notifLoading = ref(false)
+const notifItems = ref([])
 const eligibilityContext = ref('international')
 const judgeType = ref('international')
 const judgeStep = ref(0)
@@ -442,10 +637,89 @@ const consultSubmitting = ref(false)
 const APP_VERSION = '1.0.0'
 
 const saasUser = ref(null)
+const authReady = ref(false)
 const loginEmail = ref('')
 const loginPassword = ref('')
 const saasBusy = ref(false)
+const univSearch = ref('')
+const univSort = ref('recommend')
+const univSortOptions = SORT_OPTIONS
+/** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
+const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
+const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
+const azIndexLetters = AZ_INDEX_LETTERS
+const azIndexActive = ref(false)
+const univListEl = ref(null)
+let azFadeTimer = null
+const expandedUnivIds = ref({})
+const univBrowseTick = ref(0)
 const redeemCode = ref('')
+
+const browsedUniversities = computed(() => {
+  univBrowseTick.value // dependency
+  const { items } = browseUniversities(universities.value, { query: univSearch.value, sort: univSort.value })
+  return items
+})
+const univAzLetters = computed(() => {
+  univBrowseTick.value
+  const { letters } = browseUniversities(universities.value, { query: univSearch.value, sort: univSort.value })
+  return letters
+})
+const univAzPresent = computed(() => new Set(univAzLetters.value))
+watch(univSort, () => { ensureUnivSortMenuValue() })
+
+/** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
+const trialBannerText = computed(() => {
+  const u = saasUser.value
+  if (!u) return ''
+  if (u.trial_active) {
+    const d = u.trial_days_remaining
+    if (d === 1) return 'Pro 体验明天结束'
+    if (typeof d === 'number' && d > 0) return `Pro 完整体验 · 剩余 ${d} 天`
+    return 'Pro 完整体验进行中'
+  }
+  if (u.trial_status === 'EXPIRED') return '完整体验已结束 · 升级 Pro'
+  return ''
+})
+const trialBannerClass = computed(() => {
+  const u = saasUser.value
+  if (!u) return ''
+  if (u.trial_status === 'EXPIRED') return 'trial-badge--expired'
+  if (u.trial_days_remaining === 1) return 'trial-badge--urgent'
+  return 'trial-badge--active'
+})
+
+function scrollToPlans() {
+  // Keep user on member tab; plans cells are below
+  tab.value = 'member'
+}
+
+async function doSaasRegister() {
+  if (!loginEmail.value || !loginPassword.value) {
+    showFailToast('请填写邮箱和密码')
+    return
+  }
+  saasBusy.value = true
+  try {
+    const r = await saasApi.register({
+      tenant_name: loginEmail.value.split('@')[0] || '个人用户',
+      tenant_type: 'personal',
+      email: loginEmail.value,
+      password: loginPassword.value,
+      name: loginEmail.value.split('@')[0] || '用户',
+    })
+    setSaasToken(r.token)
+    saasUser.value = normalizeSaasUser(r.user)
+    showSuccessToast('已开启 7 天 Pro 完整体验')
+    await refreshStudentSwitcher()
+    await loadUniversities()
+    await loadSchedules()
+  } catch (error) {
+    showFailToast(error.message || '注册失败')
+  } finally {
+    saasBusy.value = false
+  }
+}
 function vaultDefaults() {
   return { family_note: '', child_identity: '', residence_note: '', goal_note: '', intended_major: '', target_schools: '' }
 }
@@ -453,6 +727,9 @@ const vaultJson = ref(vaultDefaults())
 const vaultSaving = ref(false)
 const expertForm = ref({ title: '', question: '', personalization: '', contact_phone: '', contact_email: '', contact_wechat: '' })
 const expertList = ref([])
+const publishedPlans = ref([])
+const publishedPlanShow = ref(false)
+const publishedPlanDetail = ref(null)
 const expertSubmitting = ref(false)
 const expertDetailShow = ref(false)
 const expertDetail = ref(null)
@@ -460,13 +737,17 @@ const expertDetailLoading = ref(false)
 const reminderList = ref([])
 const profileStudentId = activeStudentId
 const showHomeStudentPicker = ref(false)
-const homeStudentColumns = computed(() => accessibleStudents.value.map(s => ({
+const pickerEpoch = ref(0)
+const studentSwitcherList = computed(() => accessibleStudents.value.slice())
+const currentStudentId = computed(() => normalizeStudentId(activeStudentId.value))
+const currentStudentLabel = computed(() => activeStudentLabel.value)
+const homeStudentColumns = computed(() => studentSwitcherList.value.map(s => ({
   text: s.display_name || `学生 #${s.id}`,
   value: normalizeStudentId(s.id),
 })))
-const homePickerDefaultIndex = computed(() => {
-  const idx = accessibleStudents.value.findIndex(s => normalizeStudentId(s.id) === normalizeStudentId(activeStudentId.value))
-  return idx >= 0 ? idx : 0
+const homePickerSelectedValues = computed(() => {
+  const id = currentStudentId.value
+  return id != null ? [id] : []
 })
 
 async function refreshStudentSwitcher() {
@@ -476,11 +757,48 @@ async function refreshStudentSwitcher() {
     syncStudentsAndActive(r.students || [])
   } catch { /* ignore */ }
 }
+function openHomeStudentPicker() {
+  pickerEpoch.value += 1
+  showHomeStudentPicker.value = true
+}
+function extractPickerStudentId(payload) {
+  if (payload == null) return null
+  // Vant 4 object payload
+  const fromOpt = payload?.selectedOptions?.[0]
+  if (fromOpt && typeof fromOpt === 'object') {
+    const id = normalizeStudentId(fromOpt.value ?? fromOpt.id)
+    if (id != null) return id
+  }
+  const fromValues = payload?.selectedValues?.[0]
+  const fromValuesId = normalizeStudentId(fromValues)
+  if (fromValuesId != null) return fromValuesId
+  // Legacy: confirm may pass array of values / options directly
+  if (Array.isArray(payload)) {
+    const first = payload[0]
+    if (first && typeof first === 'object') {
+      return normalizeStudentId(first.value ?? first.id)
+    }
+    return normalizeStudentId(first)
+  }
+  return normalizeStudentId(payload)
+}
 function onHomePickStudent(payload) {
   showHomeStudentPicker.value = false
-  const opt = payload?.selectedOptions?.[0]
-  const id = normalizeStudentId(opt?.value ?? payload?.selectedValues?.[0])
-  if (id) setActiveStudentId(id)
+  const id = extractPickerStudentId(payload)
+  if (id == null) {
+    showFailToast('请选择有效学生档案')
+    return
+  }
+  if (id === currentStudentId.value) return
+  const beforeCount = accessibleStudents.value.length
+  if (!switchActiveStudent(id)) {
+    showFailToast('无法切换到该学生')
+    return
+  }
+  if (accessibleStudents.value.length !== beforeCount) {
+    refreshStudentSwitcher()
+  }
+  loadPublishedPlans()
 }
 
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
@@ -494,7 +812,7 @@ const monthOptions = [{ text: '全部月份', value: '' }, ...Array.from({ lengt
 const pendingLawScroll = ref(null)
 
 const form = ref(defaultForm('international'))
-const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案' }[tab.value]))
+const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', csca: 'CSCA考试中心', notifications: '通知中心' }[tab.value]))
 const judgeTypeLabel = computed(() => judgeType.value === 'huaqiao' ? '华侨生' : '国际生')
 
 watch(targetFilter, (v) => { eligibilityContext.value = v })
@@ -605,6 +923,76 @@ async function submitConsultToServer() {
 
 function pushTab(name) { if (tab.value !== name) historyStack.value.push(name); tab.value = name }
 
+
+const filteredNotifs = computed(() => {
+  const list = notifItems.value || []
+  const tabName = notifTab.value
+  if (tabName === 'timeline') return list.filter((n) => (n.category || '') === 'timeline' || (n.event_type || '').includes('DEADLINE') || (n.event_type || '').includes('TIMELINE'))
+  if (tabName === 'expert') return list.filter((n) => (n.category || '') === 'expert' || (n.event_type || '').includes('EXPERT') || (n.event_type || '').includes('REPORT'))
+  if (tabName === 'account') return list.filter((n) => (n.category || '') === 'account' || (n.event_type || '').includes('TRIAL') || (n.event_type || '').includes('MEMBER'))
+  return list.filter((n) => n.priority === 'HIGH' || n.priority === 'CRITICAL' || n.unread)
+})
+
+async function refreshNotifBadge() {
+  if (!getSaasToken()) { notifUnread.value = 0; return }
+  try {
+    const data = await saasApi.notificationUnreadCount()
+    notifUnread.value = data.unread_count || 0
+  } catch { /* ignore */ }
+}
+
+async function loadNotifications() {
+  notifLoading.value = true
+  try {
+    const data = await saasApi.notifications({ unread_only: false })
+    notifItems.value = data.items || []
+    notifUnread.value = data.unread_count || 0
+  } catch {
+    notifItems.value = []
+  } finally {
+    notifLoading.value = false
+  }
+}
+
+async function openNotifications() {
+  pushTab('notifications')
+  await loadNotifications()
+  await showNotifPopupsOnce()
+}
+
+async function showNotifPopupsOnce() {
+  if (!getSaasToken()) return
+  try {
+    const data = await saasApi.notificationPopups()
+    for (const n of data.items || []) {
+      const isCrit = n.priority === 'CRITICAL'
+      await showDialog({
+        title: n.title || '重要提醒',
+        message: n.body || '',
+        confirmButtonText: isCrit ? '我已知晓' : '知道了',
+      })
+      try { await saasApi.notificationPopupShown(n.id) } catch { /* ignore */ }
+      if (isCrit) {
+        try { await saasApi.notificationRead(n.id) } catch { /* ignore */ }
+      }
+    }
+    await refreshNotifBadge()
+  } catch { /* ignore */ }
+}
+
+async function openNotifItem(n) {
+  try { if (n.unread) await saasApi.notificationRead(n.id) } catch { /* ignore */ }
+  const et = n.event_type || ''
+  if (et.includes('EXPERT') || et.includes('REPORT')) openPage('member')
+  else if (et.includes('CSCA')) openPage('csca')
+  else if (et.includes('DEADLINE') || et.includes('TIMELINE')) openPage('schedule')
+  else if (et.includes('MEMBER') || et.includes('TRIAL')) openPage('member')
+  else if (et.includes('PROFILE') || et.includes('ELIGIBILITY')) openPage('profile')
+  else openPage('home')
+  await refreshNotifBadge()
+}
+
+
 function openPage(name) {
   if (name === 'universities' || name === 'schedule') {
     targetFilter.value = eligibilityContext.value
@@ -627,11 +1015,85 @@ async function refreshSaasUser() {
     return
   }
   try {
-    saasUser.value = await saasApi.me()
-  } catch {
-    setSaasToken('')
+    saasUser.value = normalizeSaasUser(await saasApi.me())
+  } catch (error) {
+    if (error && error.status === 401) {
+      setSaasToken('')
+      saasUser.value = null
+      return
+    }
+    // Network blip: keep token; leave saasUser null so gate can show after explicit logout only if needed
+    // Keep session token so a retry can restore.
     saasUser.value = null
   }
+}
+
+async function onAuthSuccess(user) {
+  saasUser.value = normalizeSaasUser(user)
+  authReady.value = true
+  tab.value = 'home'
+  historyStack.value = ['home']
+  await refreshStudentSwitcher()
+  await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+  if (saasUser.value?.trial_active) {
+    showSuccessToast(`7天 Pro 试用中 · 剩余 ${saasUser.value.trial_days_remaining ?? '—'} 天`)
+  }
+}
+
+function onUnivBrowseChange() {
+  univBrowseTick.value += 1
+}
+function setUnivSort(v) {
+  univSort.value = v
+  onUnivBrowseChange()
+}
+function ensureUnivSortMenuValue() {
+  const ok = univSortMenuOptions.some((o) => o.value === univSort.value)
+  if (!ok) univSort.value = 'recommend'
+}
+function setUnivTarget(v) {
+  targetFilter.value = v
+  loadUniversities()
+}
+function cycleFromOptions(current, options, key = 'value') {
+  const vals = options.map((o) => o[key])
+  const idx = vals.indexOf(current)
+  return vals[(idx + 1) % vals.length]
+}
+function cycleUnivTag() {
+  tagFilter.value = cycleFromOptions(tagFilter.value, tagOptions)
+  loadUniversities()
+}
+function cycleUnivProvince() {
+  provinceFilter.value = cycleFromOptions(provinceFilter.value, provinceOptions)
+  loadUniversities()
+}
+function cycleUnivField() {
+  univFieldFilter.value = cycleFromOptions(univFieldFilter.value, univFieldOptions)
+  loadUniversities()
+}
+function toggleUnivExpand(id) {
+  expandedUnivIds.value = { ...expandedUnivIds.value, [id]: !expandedUnivIds.value[id] }
+}
+function scrollUnivLetter(letter) {
+  const el = document.querySelector(`.univ-card[data-az="${letter}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+function pulseAzIndex() {
+  azIndexActive.value = true
+  if (azFadeTimer) clearTimeout(azFadeTimer)
+  azFadeTimer = setTimeout(() => { azIndexActive.value = false }, 1200)
+}
+function onAzLetterClick(letter) {
+  pulseAzIndex()
+  if (!univAzPresent.value.has(letter)) return
+  scrollUnivLetter(letter)
+}
+function onUnivListScroll() {
+  pulseAzIndex()
+}
+function onUnivTargetDropdown() {
+  setUnivTarget(targetFilter.value)
 }
 
 async function doSaasLogin() {
@@ -639,11 +1101,12 @@ async function doSaasLogin() {
   try {
     const r = await saasApi.login(loginEmail.value, loginPassword.value)
     setSaasToken(r.token)
-    saasUser.value = r.user
+    saasUser.value = normalizeSaasUser(r.user)
     showSuccessToast('登录成功')
     await refreshStudentSwitcher()
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -659,7 +1122,16 @@ function doSaasLogout() {
   saasUser.value = null
   clearActiveStudent()
   expertList.value = []
+  publishedPlans.value = []
+  publishedPlanDetail.value = null
+  publishedPlanShow.value = false
   reminderList.value = []
+  notifItems.value = []
+  notifUnread.value = 0
+  universities.value = []
+  tab.value = 'home'
+  historyStack.value = ['home']
+  showSuccessToast('已退出登录')
 }
 
 async function buySaasPlan(plan_code) {
@@ -675,6 +1147,7 @@ async function buySaasPlan(plan_code) {
     showSuccessToast('已开通（模拟支付）')
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -697,12 +1170,13 @@ async function doRedeem() {
   saasBusy.value = true
   try {
     const r = await saasApi.redeem(redeemCode.value.trim())
-    if (r.user) saasUser.value = r.user
+    if (r.user) saasUser.value = normalizeSaasUser(r.user)
     else await refreshSaasUser()
     showSuccessToast(r.message || '兑换成功')
     redeemCode.value = ''
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
     await loadUniversities()
     await loadSchedules()
@@ -759,6 +1233,42 @@ async function loadExpertList() {
   } catch {
     expertList.value = []
   }
+}
+
+async function loadPublishedPlans() {
+  publishedPlans.value = []
+  if (!getSaasToken() || !currentStudentId.value) return
+  try {
+    const r = await saasApi.publishedConsultations(currentStudentId.value)
+    publishedPlans.value = (r.consultations || []).filter((c) => c.status === 'PUBLISHED')
+  } catch {
+    publishedPlans.value = []
+  }
+}
+
+function planTitle(p) {
+  if (!p) return '专家规划'
+  const kindMap = {
+    student_portrait: '学生画像',
+    eligibility_risk: '资格风险分析',
+    school_recommendation: '选校建议',
+    material_gaps: '材料缺口',
+    timeline_plan: '时间规划',
+    parent_report: '家长沟通报告',
+    one_on_one_draft: '一对一规划',
+  }
+  return p.title || kindMap[p.report_kind] || p.report_kind || '专家规划'
+}
+
+function planSubtitle(p) {
+  const when = p.published_at ? new Date(p.published_at).toLocaleString() : ''
+  const summary = (p.summary || '').slice(0, 48)
+  return [when, summary].filter(Boolean).join(' · ')
+}
+
+function openPublishedPlan(p) {
+  publishedPlanDetail.value = p
+  publishedPlanShow.value = true
 }
 
 async function loadReminders() {
@@ -985,6 +1495,7 @@ async function onTabChange(name = tab.value) {
     await refreshSaasUser()
     await loadVaultFromSources()
     await loadExpertList()
+    await loadPublishedPlans()
     await loadReminders()
   }
   if (name === 'laws') {
@@ -1032,8 +1543,14 @@ onMounted(async () => {
     app_version: APP_VERSION,
     platform: detectPlatform(),
   })
-  await refreshSaasUser()
-  await refreshStudentSwitcher()
-  await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+  try {
+    await refreshSaasUser()
+    if (saasUser.value) {
+      await refreshStudentSwitcher()
+      await Promise.all([loadLaws(), loadUniversities(), loadSchedules(), loadRecords()])
+    }
+  } finally {
+    authReady.value = true
+  }
 })
 </script>
