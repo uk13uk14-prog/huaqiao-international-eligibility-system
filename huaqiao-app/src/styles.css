@@ -109,12 +109,18 @@ html.dark body { background: #0b1120; }
 .sticky-actions { position: sticky; bottom: calc(58px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr; gap: 10px; padding: 12px; background: linear-gradient(to top, rgba(238,243,251,.98), rgba(238,243,251,.78)); }
 .dark .sticky-actions { background: linear-gradient(to top, rgba(15,23,42,.98), rgba(15,23,42,.72)); }
 .list-screen .van-search, .list-screen .van-dropdown-menu { position: sticky; top: calc(46px + env(safe-area-inset-top, 0px)); z-index: 4; }
-/* University toolbar is in-flow chrome; inner search/menus must not stick or they clip card #1. */
+/* University toolbar is in-flow chrome. Force static so iOS cannot
+   composite search/filter titles over a body-teleported menu or clip card #1. */
 .list-screen .univ-toolbar .van-search,
-.list-screen .univ-toolbar .van-dropdown-menu {
-  position: static;
-  top: auto;
-  z-index: auto;
+.list-screen .univ-toolbar .van-sticky,
+.list-screen .univ-toolbar .van-dropdown-menu,
+.list-screen .univ-toolbar .van-dropdown-menu__bar,
+.list-screen .univ-toolbar .van-dropdown-menu__title {
+  position: static !important;
+  top: auto !important;
+  z-index: auto !important;
+  transform: none !important;
+  filter: none !important;
 }
 .ai-screen { display: grid; gap: 12px; }
 .ai-answer { white-space: pre-wrap; line-height: 1.8; }
@@ -311,6 +317,25 @@ body.gq-univ-sort-open .van-dropdown-item {
   pointer-events: none !important;
   z-index: 0 !important;
 }
+/* Inactive filter cells stay in the toolbar stacking tree and iOS can
+   paint their titles on top of a body-fixed menu. Hide them while any
+   university menu is open so only overlay + active menu remain. */
+body.gq-univ-menu-open .univ-screen .mf-cell:not(.is-menu-open) {
+  visibility: hidden;
+  pointer-events: none;
+}
+body.gq-univ-menu-open .univ-az,
+.univ-screen.has-univ-menu .univ-az,
+.univ-screen.has-sort-menu .univ-az {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+}
+body.gq-univ-menu-open .univ-layout,
+.univ-screen.has-univ-menu .univ-layout {
+  pointer-events: none;
+  -webkit-overflow-scrolling: auto;
+}
 .van-dropdown-item__content {
   padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
 }
@@ -323,6 +348,14 @@ body.gq-univ-sort-open .van-dropdown-item {
   max-height: calc(100dvh - 46px - env(safe-area-inset-top, 0px) - 64px - env(safe-area-inset-bottom, 0px) - 24px);
   overflow: hidden;
 }
+.univ-results {
+  flex: none;
+  position: relative;
+  z-index: auto;
+  padding: 8px 12px 10px;
+  background: #e4eaf4;
+}
+.dark .univ-results { background: #0b1120; }
 .univ-layout {
   position: relative;
   z-index: auto;
@@ -333,8 +366,8 @@ body.gq-univ-sort-open .van-dropdown-item {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding-top: 8px;
+  -webkit-overflow-scrolling: auto;
+  padding-top: 12px;
 }
 .univ-list {
   flex: 1;
@@ -350,10 +383,23 @@ body.gq-univ-sort-open .van-dropdown-item {
   background: #ffffff;
   padding: 12px 12px 10px;
   margin: 0;
+  overflow: visible;
 }
 .dark .univ-card { background: #0f172a; border-color: #475569; color: #e2e8f0; }
-.univ-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.univ-card-head b { font-size: 15px; line-height: 1.35; }
+.univ-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: visible;
+  position: relative;
+  z-index: auto;
+}
+.univ-card-head b {
+  font-size: 15px;
+  line-height: 1.35;
+  overflow: visible;
+}
 .univ-card-meta { margin: 6px 0 0; font-size: 12px; color: #64748b; line-height: 1.45; }
 .dark .univ-card-meta { color: #94a3b8; }
 .univ-card-majors {
@@ -381,11 +427,11 @@ body.gq-univ-sort-open .van-dropdown-item {
   overflow-y: auto;
   padding: 4px 0;
   margin-left: -2px;
-  z-index: 1;
+  z-index: 0;
   opacity: 0.4;
   transition: opacity 0.25s ease;
   pointer-events: auto;
-  -webkit-overflow-scrolling: touch;
+  -webkit-overflow-scrolling: auto;
 }
 .univ-az.is-active { opacity: 0.95; }
 .univ-az.is-inert,
@@ -411,8 +457,8 @@ body.gq-univ-sort-open .van-dropdown-item {
 .dark .univ-az-btn,
 .dark .univ-az button { color: #93c5fd; }
 .univ-count {
-  margin: 8px 8px 0;
-  padding: 0 0 6px;
+  margin: 0;
+  padding: 0;
   font-size: 12px;
   color: #64748b;
 }

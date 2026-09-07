@@ -65,6 +65,7 @@ import {
 const props = defineProps({
   modelValue: { type: String, default: 'recommend' },
   options: { type: Array, default: () => SORT_MENU_OPTIONS },
+  closeTick: { type: Number, default: 0 },
 })
 const emit = defineEmits(['update:modelValue', 'open-change'])
 
@@ -128,6 +129,10 @@ function select(value) {
 function onViewportChange() {
   if (open.value) placePanel()
 }
+
+watch(() => props.closeTick, (n, prev) => {
+  if (n !== prev) close()
+})
 
 watch(open, (v) => {
   if (typeof window === 'undefined') return

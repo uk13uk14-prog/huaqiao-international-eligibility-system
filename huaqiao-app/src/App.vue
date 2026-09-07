@@ -258,44 +258,79 @@
         </van-cell-group>
       </section>
 
-      <section v-if="tab === 'universities'" class="list-screen univ-screen" :class="{ 'has-sort-menu': sortMenuOpen }">
+      <section v-if="tab === 'universities'" class="list-screen univ-screen" :class="{ 'has-sort-menu': sortMenuOpen, 'has-univ-menu': univMenuOpen }">
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
           <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univVantOpen === 'target' }">
               <span class="mf-label">身份</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item teleport="body" v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
+                <van-dropdown-item
+                  ref="univTargetItem"
+                  teleport="body"
+                  v-model="targetFilter"
+                  :options="targetOptions"
+                  @open="onUnivVantOpen('target')"
+                  @close="onUnivVantClose('target')"
+                  @change="onUnivTargetDropdown"
+                />
               </van-dropdown-menu>
             </div>
-            <div class="mf-cell" :class="{ 'is-sort-open': sortMenuOpen }">
+            <div class="mf-cell" :class="{ 'is-sort-open': sortMenuOpen, 'is-menu-open': sortMenuOpen }">
               <span class="mf-label">排序</span>
               <SortMenu
                 :model-value="univSort"
                 :options="univSortMenuOptions"
+                :close-tick="sortCloseTick"
                 @update:model-value="setUnivSort"
                 @open-change="onSortMenuOpenChange"
               />
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univVantOpen === 'province' }">
               <span class="mf-label">地区</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item teleport="body" v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
+                <van-dropdown-item
+                  ref="univProvinceItem"
+                  teleport="body"
+                  v-model="provinceFilter"
+                  :options="provinceOptions"
+                  @open="onUnivVantOpen('province')"
+                  @close="onUnivVantClose('province')"
+                  @change="loadUniversities"
+                />
               </van-dropdown-menu>
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univVantOpen === 'tag' }">
               <span class="mf-label">院校类型</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item teleport="body" v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
+                <van-dropdown-item
+                  ref="univTagItem"
+                  teleport="body"
+                  v-model="tagFilter"
+                  :options="tagOptions"
+                  @open="onUnivVantOpen('tag')"
+                  @close="onUnivVantClose('tag')"
+                  @change="loadUniversities"
+                />
               </van-dropdown-menu>
             </div>
-            <div class="mf-cell mf-cell-wide">
+            <div class="mf-cell mf-cell-wide" :class="{ 'is-menu-open': univVantOpen === 'field' }">
               <span class="mf-label">专业</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item teleport="body" v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
+                <van-dropdown-item
+                  ref="univFieldItem"
+                  teleport="body"
+                  v-model="univFieldFilter"
+                  :options="univFieldOptions"
+                  @open="onUnivVantOpen('field')"
+                  @close="onUnivVantClose('field')"
+                  @change="loadUniversities"
+                />
               </van-dropdown-menu>
             </div>
           </div>
+        </div>
+        <div class="univ-results">
           <p class="univ-count">显示 {{ browsedUniversities.length }} / API {{ universities.length }} 所</p>
           <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
         </div>
@@ -326,7 +361,7 @@
           </div>
           <nav
             class="univ-az"
-            :class="{ 'is-active': azIndexActive, 'is-inert': sortMenuOpen }"
+            :class="{ 'is-active': azIndexActive, 'is-inert': univMenuOpen }"
             aria-label="拼音首字母索引"
             @touchstart.passive="pulseAzIndex"
           >
@@ -653,6 +688,13 @@ const univSearch = ref('')
 const univSort = ref('recommend')
 const univSortOptions = SORT_OPTIONS
 const sortMenuOpen = ref(false)
+const sortCloseTick = ref(0)
+const univVantOpen = ref('')
+const univTargetItem = ref(null)
+const univProvinceItem = ref(null)
+const univTagItem = ref(null)
+const univFieldItem = ref(null)
+const univMenuOpen = computed(() => sortMenuOpen.value || !!univVantOpen.value)
 /** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
 const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
@@ -1052,11 +1094,45 @@ async function onAuthSuccess(user) {
 function onUnivBrowseChange() {
   univBrowseTick.value += 1
 }
+function syncUnivMenuBodyClass() {
+  if (typeof document === 'undefined') return
+  const anyOpen = sortMenuOpen.value || !!univVantOpen.value
+  document.body.classList.toggle('gq-univ-menu-open', anyOpen)
+  document.body.classList.toggle('gq-univ-sort-open', sortMenuOpen.value)
+}
+
+function closeUnivVantExcept(keep) {
+  const items = {
+    target: univTargetItem,
+    province: univProvinceItem,
+    tag: univTagItem,
+    field: univFieldItem,
+  }
+  for (const [name, slot] of Object.entries(items)) {
+    if (name === keep) continue
+    try { slot.value?.toggle?.(false) } catch { /* closed or unmounted */ }
+  }
+}
+
+function onUnivVantOpen(name) {
+  univVantOpen.value = name
+  if (sortMenuOpen.value) {
+    sortMenuOpen.value = false
+    sortCloseTick.value += 1
+  }
+  closeUnivVantExcept(name)
+  syncUnivMenuBodyClass()
+}
+
+function onUnivVantClose(name) {
+  if (univVantOpen.value === name) univVantOpen.value = ''
+  syncUnivMenuBodyClass()
+}
+
 function onSortMenuOpenChange(open) {
   sortMenuOpen.value = !!open
-  if (typeof document !== 'undefined') {
-    document.body.classList.toggle('gq-univ-sort-open', !!open)
-  }
+  if (open) closeUnivVantExcept('')
+  syncUnivMenuBodyClass()
 }
 function setUnivSort(v) {
   univSort.value = v
@@ -1586,6 +1662,7 @@ async function saveResultImage() {
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.body.classList.remove('gq-univ-sort-open')
+    document.body.classList.remove('gq-univ-menu-open')
   }
 })
 
