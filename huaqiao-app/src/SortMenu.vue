@@ -11,15 +11,17 @@
       <span class="sort-menu__value">{{ currentLabel }}</span>
       <span class="sort-menu__caret" aria-hidden="true">{{ open ? '▲' : '▼' }}</span>
     </button>
-    <Teleport :to="teleportTarget" :disabled="!teleportReady">
+    <Teleport to="body">
       <div
         v-if="open"
         class="sort-menu-overlay"
         aria-hidden="true"
-        @pointerdown.prevent.stop="close"
-        @click.prevent.stop="close"
-        @touchstart.prevent.stop="close"
-        @touchmove.prevent
+        @pointerdown.prevent.stop="onOverlayGuard"
+        @touchstart.prevent.stop="onOverlayGuard"
+        @touchmove.prevent.stop
+        @pointerup.prevent.stop="onOverlayClose"
+        @touchend.prevent.stop="onOverlayClose"
+        @click.prevent.stop="onOverlayClose"
       />
       <div
         v-if="open"
@@ -27,8 +29,10 @@
         role="listbox"
         :style="panelStyle"
         @pointerdown.stop
+        @pointerup.stop
         @click.stop
         @touchstart.stop
+        @touchend.stop
       >
         <button
           v-for="opt in resolvedOptions"
@@ -49,14 +53,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   applySortSelection,
+  armOverlayGhostClickGuard,
   panelStyleFromTriggerRect,
-  relativeTriggerRect,
   SORT_MENU_OPTIONS,
   sortMenuLabel,
-  UNIV_SORT_LAYER_ID,
 } from './sortMenu.js'
 
 const props = defineProps({
@@ -67,9 +70,8 @@ const emit = defineEmits(['update:modelValue', 'open-change'])
 
 const open = ref(false)
 const triggerEl = ref(null)
-const teleportReady = ref(false)
 const panelStyle = ref({ top: '0px', left: '0px', width: '160px' })
-const teleportTarget = computed(() => `#${UNIV_SORT_LAYER_ID}`)
+let disarmGhost = null
 
 const resolvedOptions = computed(() => {
   const list = Array.isArray(props.options) && props.options.length ? props.options : SORT_MENU_OPTIONS
@@ -77,28 +79,20 @@ const resolvedOptions = computed(() => {
 })
 const currentLabel = computed(() => sortMenuLabel(props.modelValue, resolvedOptions.value))
 
-function hostRect() {
-  if (typeof document === 'undefined') return null
-  return document.getElementById(UNIV_SORT_LAYER_ID)?.getBoundingClientRect?.() || null
-}
-
 function placePanel() {
   const el = triggerEl.value
   const rect = el?.getBoundingClientRect?.()
-  const host = hostRect()
-  const local = relativeTriggerRect(rect, host)
-  const vw = host?.width || (typeof window !== 'undefined' ? window.innerWidth : 390)
-  panelStyle.value = panelStyleFromTriggerRect(local, { viewportWidth: vw })
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 390
+  panelStyle.value = panelStyleFromTriggerRect(rect, { viewportWidth: vw })
 }
 
 function setOpen(next) {
   const v = !!next
   if (open.value === v) return
-  if (v) {
-    teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
-  }
   open.value = v
-  if (v) placePanel()
+  if (v) {
+    nextTick(() => placePanel())
+  }
   emit('open-change', v)
 }
 
@@ -108,6 +102,21 @@ function toggle() {
 
 function close() {
   setOpen(false)
+}
+
+function onOverlayGuard(e) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function onOverlayClose(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.type === 'touchend' || e.type === 'pointerup') {
+    disarmGhost?.()
+    disarmGhost = armOverlayGhostClickGuard()
+  }
+  close()
 }
 
 function select(value) {
@@ -120,14 +129,8 @@ function onViewportChange() {
   if (open.value) placePanel()
 }
 
-onMounted(async () => {
-  await nextTick()
-  teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
-})
-
 watch(open, (v) => {
   if (typeof window === 'undefined') return
-  teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
   if (v) {
     window.addEventListener('resize', onViewportChange)
     window.addEventListener('scroll', onViewportChange, true)
@@ -138,6 +141,8 @@ watch(open, (v) => {
 })
 
 onBeforeUnmount(() => {
+  disarmGhost?.()
+  disarmGhost = null
   if (typeof window === 'undefined') return
   window.removeEventListener('resize', onViewportChange)
   window.removeEventListener('scroll', onViewportChange, true)
@@ -168,18 +173,18 @@ html.dark .sort-menu__trigger { color: #e2e8f0; }
 .sort-menu.is-open .sort-menu__caret { color: #2563eb; }
 
 .sort-menu-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 1;
-  background: transparent;
+  z-index: 3000;
+  background: rgba(0, 0, 0, 0.25);
   pointer-events: auto;
   touch-action: none;
   opacity: 1;
 }
 
 .sort-menu-panel {
-  position: absolute;
-  z-index: 2;
+  position: fixed;
+  z-index: 3001;
   box-sizing: border-box;
   background: #ffffff;
   opacity: 1;
@@ -226,6 +231,6 @@ html.dark .sort-menu-item {
 }
 html.dark .sort-menu-item.is-selected {
   color: #93c5fd;
-  background: rgba(37, 99, 235, 0.22);
+  background: #1e3a5f;
 }
 </style>

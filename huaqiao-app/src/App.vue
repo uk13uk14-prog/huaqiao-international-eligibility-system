@@ -258,14 +258,13 @@
       </section>
 
       <section v-if="tab === 'universities'" class="list-screen univ-screen" :class="{ 'has-sort-menu': sortMenuOpen }">
-        <div :id="univSortLayerId" class="univ-sort-layer" />
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
           <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
             <div class="mf-cell">
               <span class="mf-label">身份</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
+                <van-dropdown-item teleport="body" v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
               </van-dropdown-menu>
             </div>
             <div class="mf-cell" :class="{ 'is-sort-open': sortMenuOpen }">
@@ -280,19 +279,19 @@
             <div class="mf-cell">
               <span class="mf-label">地区</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
+                <van-dropdown-item teleport="body" v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
               </van-dropdown-menu>
             </div>
             <div class="mf-cell">
               <span class="mf-label">院校类型</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
+                <van-dropdown-item teleport="body" v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
               </van-dropdown-menu>
             </div>
             <div class="mf-cell mf-cell-wide">
               <span class="mf-label">专业</span>
               <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
+                <van-dropdown-item teleport="body" v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
               </van-dropdown-menu>
             </div>
           </div>
@@ -569,7 +568,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showDialog, showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
 import {
@@ -589,7 +588,6 @@ import AuthGate from './AuthGate.vue'
 import { normalizeSaasUser } from './authSession.js'
 import { mergeEligibilityForm, mapStudentToEligibilityPrefills } from './eligibilityPrefill.js'
 import SortMenu from './SortMenu.vue'
-import { UNIV_SORT_LAYER_ID } from './sortMenu.js'
 import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 import CscaExamCenter from './CscaExamCenter.vue'
@@ -653,7 +651,6 @@ const univSearch = ref('')
 const univSort = ref('recommend')
 const univSortOptions = SORT_OPTIONS
 const sortMenuOpen = ref(false)
-const univSortLayerId = UNIV_SORT_LAYER_ID
 /** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
 const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
@@ -1055,6 +1052,9 @@ function onUnivBrowseChange() {
 }
 function onSortMenuOpenChange(open) {
   sortMenuOpen.value = !!open
+  if (typeof document !== 'undefined') {
+    document.body.classList.toggle('gq-univ-sort-open', !!open)
+  }
 }
 function setUnivSort(v) {
   univSort.value = v
@@ -1580,6 +1580,12 @@ async function saveResultImage() {
     savingImage.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('gq-univ-sort-open')
+  }
+})
 
 onMounted(async () => {
   syncHtmlDark()

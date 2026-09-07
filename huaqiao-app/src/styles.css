@@ -285,31 +285,31 @@ html.dark body { background: #0b1120; }
 }
 .mf-grid-schedule { margin: 0 0 8px; }
 
-/* Filter UX V2 — labeled grid. Do NOT sticky+z-index the toolbar:
-   iOS Safari composites sticky layers above body-fixed / teleported menus,
-   which painted 全部地区/全部层级/全部领域 on top of the white SortMenu. */
+/* Filter UX V2 — toolbar stays in normal flow (not sticky).
+   SortMenu + Vant university dropdowns teleport to body so they are
+   not trapped by univ-screen overflow / former isolation stacking. */
 .univ-toolbar {
   position: relative;
-  z-index: 2;
+  z-index: auto;
   flex: none;
   background: #e4eaf4;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
 }
 .dark .univ-toolbar { background: #0b1120; }
 .mf-grid-schedule {
   position: relative;
-  z-index: 2;
+  z-index: auto;
   background: #e4eaf4;
   padding: 8px 4px 6px;
 }
 .dark .mf-grid-schedule { background: #0b1120; }
 .van-dropdown-item {
-  z-index: 10 !important;
+  z-index: 2000;
 }
-.list-screen.has-sort-menu .van-dropdown-item {
+body.gq-univ-sort-open .van-dropdown-item {
+  visibility: hidden !important;
+  pointer-events: none !important;
   z-index: 0 !important;
-  visibility: hidden;
-  pointer-events: none;
 }
 .van-dropdown-item__content {
   padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
@@ -319,13 +319,13 @@ html.dark body { background: #0b1120; }
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: 0;
   max-height: calc(100dvh - 46px - env(safe-area-inset-top, 0px) - 64px - env(safe-area-inset-bottom, 0px) - 24px);
   overflow: hidden;
-  isolation: isolate;
 }
 .univ-layout {
   position: relative;
-  z-index: 1;
+  z-index: auto;
   display: flex;
   align-items: flex-start;
   gap: 0;
@@ -334,18 +334,22 @@ html.dark body { background: #0b1120; }
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  padding-top: 8px;
 }
 .univ-list {
   flex: 1;
   min-width: 0;
-  padding: 10px 18px 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 12px 0;
 }
 .univ-card {
   border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 14px;
   background: #ffffff;
   padding: 12px 12px 10px;
-  margin: 0 0 10px;
+  margin: 0;
 }
 .dark .univ-card { background: #0f172a; border-color: #475569; color: #e2e8f0; }
 .univ-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -388,18 +392,9 @@ html.dark body { background: #0b1120; }
 .list-screen.has-sort-menu .univ-az,
 .list-screen.has-sort-menu .univ-layout,
 .list-screen.has-sort-menu .mf-cell:not(.is-sort-open),
-.list-screen.has-sort-menu .univ-toolbar .van-search {
+.list-screen.has-sort-menu .univ-toolbar .van-search,
+.list-screen.has-sort-menu .univ-count {
   pointer-events: none;
-}
-.univ-sort-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 80;
-  pointer-events: none;
-  isolation: isolate;
-}
-.list-screen.has-sort-menu .univ-sort-layer {
-  pointer-events: auto;
 }
 .univ-az-btn,
 .univ-az button {
@@ -415,7 +410,12 @@ html.dark body { background: #0b1120; }
 .univ-az-btn.is-empty { opacity: 0.28; }
 .dark .univ-az-btn,
 .dark .univ-az button { color: #93c5fd; }
-.univ-count { margin: 6px 8px 0; font-size: 12px; color: #64748b; }
+.univ-count {
+  margin: 8px 8px 0;
+  padding: 0 0 6px;
+  font-size: 12px;
+  color: #64748b;
+}
 .dark .univ-count { color: #94a3b8; }
 .auth-boot {
   min-height: 100vh;

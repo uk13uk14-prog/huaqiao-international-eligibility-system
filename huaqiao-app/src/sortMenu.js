@@ -1,11 +1,17 @@
 /**
  * Sort dropdown behaviour helpers (solid menu, no click-through).
+ * Overlay + panel teleport to document.body so they escape university
+ * toolbar / univ-screen stacking contexts (isolation, overflow, sticky).
  */
 
 export const SORT_MENU_OPTIONS = [
   { text: '推荐', value: 'recommend' },
   { text: 'A-Z', value: 'az' },
 ]
+
+/** Overlay above page + Vant dropdowns (~2000); menu above overlay. */
+export const SORT_OVERLAY_Z_INDEX = 3000
+export const SORT_MENU_Z_INDEX = 3001
 
 export function sortMenuLabel(value, options = SORT_MENU_OPTIONS) {
   const hit = (options || []).find((o) => o.value === value)
@@ -23,32 +29,40 @@ export function applySortSelection(current, clicked) {
   }
 }
 
-export const UNIV_SORT_LAYER_ID = 'univ-sort-layer'
-
 export function universityChromeWhenMenuOpen(open) {
   return {
     overlay: !!open,
     azPointerEvents: open ? 'none' : 'auto',
     overlayPointerEvents: open ? 'auto' : 'none',
     filterPointerEvents: open ? 'none' : 'auto',
-    toolbarSticky: open ? 'relative' : 'sticky',
+    toolbarSticky: 'relative',
   }
 }
 
-/** Convert viewport rects into coordinates inside a host stacking layer. */
-export function relativeTriggerRect(triggerRect, hostRect) {
-  if (!triggerRect) return null
-  if (!hostRect) return triggerRect
-  return {
-    left: (triggerRect.left || 0) - (hostRect.left || 0),
-    right: (triggerRect.right || 0) - (hostRect.left || 0),
-    top: (triggerRect.top || 0) - (hostRect.top || 0),
-    bottom: (triggerRect.bottom || 0) - (hostRect.top || 0),
-    width: triggerRect.width || 0,
-    height: triggerRect.height || 0,
+/**
+ * iOS synthesizes a click on whatever sits under a just-removed overlay.
+ * Swallow the following click/touchend in capture for one gesture.
+ */
+export function armOverlayGhostClickGuard(doc = typeof document !== 'undefined' ? document : null, delayMs = 350) {
+  if (!doc?.addEventListener) return () => {}
+  const swallow = (ev) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+  }
+  doc.addEventListener('click', swallow, true)
+  doc.addEventListener('touchend', swallow, true)
+  const t = setTimeout(() => {
+    doc.removeEventListener('click', swallow, true)
+    doc.removeEventListener('touchend', swallow, true)
+  }, delayMs)
+  return () => {
+    clearTimeout(t)
+    doc.removeEventListener('click', swallow, true)
+    doc.removeEventListener('touchend', swallow, true)
   }
 }
 
+/** Viewport (fixed) coordinates — do not subtract a local host rect. */
 export function panelStyleFromTriggerRect(rect, { gap = 4, minWidth = 160, viewportWidth = 390 } = {}) {
   if (!rect) return { top: '0px', left: '0px', width: `${minWidth}px` }
   const width = Math.max(minWidth, Math.round(rect.width || 0))

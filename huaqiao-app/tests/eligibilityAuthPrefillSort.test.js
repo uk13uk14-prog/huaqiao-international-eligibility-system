@@ -14,9 +14,11 @@ import {
 import { mapStudentToEligibilityPrefills, mergeEligibilityForm } from '../src/eligibilityPrefill.js'
 import {
   SORT_MENU_OPTIONS,
+  SORT_MENU_Z_INDEX,
+  SORT_OVERLAY_Z_INDEX,
   applySortSelection,
+  armOverlayGhostClickGuard,
   panelStyleFromTriggerRect,
-  relativeTriggerRect,
   sortMenuLabel,
   universityChromeWhenMenuOpen,
 } from '../src/sortMenu.js'
@@ -24,6 +26,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url))
 const cssPath = path.resolve(here, '../src/styles.css')
 const sortVuePath = path.resolve(here, '../src/SortMenu.vue')
+const appVuePath = path.resolve(here, '../src/App.vue')
 const apiPath = path.resolve(here, '../src/api.js')
 
 function mockLocalStorage() {
@@ -154,42 +157,100 @@ test('sort dropdown selection and click-through prevention helpers', () => {
   assert.equal(openChrome.filterPointerEvents, 'none')
   const closedChrome = universityChromeWhenMenuOpen(false)
   assert.equal(closedChrome.azPointerEvents, 'auto')
+  assert.equal(closedChrome.filterPointerEvents, 'auto')
   assert.ok(SORT_MENU_OPTIONS.some((o) => o.value === 'az'))
+  assert.equal(SORT_OVERLAY_Z_INDEX, 3000)
+  assert.equal(SORT_MENU_Z_INDEX, 3001)
+  assert.ok(SORT_MENU_Z_INDEX > SORT_OVERLAY_Z_INDEX)
   const style = panelStyleFromTriggerRect({ left: 20, bottom: 120, width: 80 }, { viewportWidth: 390 })
   assert.equal(style.top, '124px')
   assert.match(style.width, /16\dpx/)
-  const local = relativeTriggerRect(
-    { left: 100, bottom: 200, width: 80, top: 160, right: 180, height: 40 },
-    { left: 12, top: 80, width: 366 },
-  )
-  assert.equal(local.left, 88)
-  assert.equal(local.bottom, 120)
 })
 
-test('sort menu vue uses solid panel, overlay, and no container opacity', () => {
+test('overlay ghost-click guard swallows the next document click', () => {
+  const calls = []
+  const listeners = { click: [], touchend: [] }
+  const doc = {
+    addEventListener(type, fn, capture) {
+      if (capture) listeners[type]?.push(fn)
+    },
+    removeEventListener(type, fn, capture) {
+      if (!capture || !listeners[type]) return
+      listeners[type] = listeners[type].filter((x) => x !== fn)
+    },
+  }
+  const disarm = armOverlayGhostClickGuard(doc, 20)
+  const ev = {
+    preventDefault() { calls.push('prevent') },
+    stopPropagation() { calls.push('stop') },
+  }
+  listeners.click[0](ev)
+  assert.ok(calls.includes('prevent'))
+  assert.ok(calls.includes('stop'))
+  disarm()
+  assert.equal(listeners.click.length, 0)
+})
+
+test('sort menu vue teleports overlay+panel to body with solid menu', () => {
   const vue = fs.readFileSync(sortVuePath, 'utf8')
+  assert.match(vue, /Teleport to="body"/)
   assert.match(vue, /sort-menu-overlay/)
   assert.match(vue, /background:\s*#ffffff/i)
-  assert.match(vue, /pointerdown\.prevent\.stop="close"/)
-  assert.match(vue, /UNIV_SORT_LAYER_ID/)
-  assert.doesNotMatch(vue, /Teleport to="body"/)
+  assert.match(vue, /background:\s*rgba\(\s*0,\s*0,\s*0,\s*0\.25\s*\)/)
+  assert.match(vue, /z-index:\s*3000/)
+  assert.match(vue, /z-index:\s*3001/)
+  assert.match(vue, /position:\s*fixed/)
+  assert.match(vue, /pointer-events:\s*auto/)
+  assert.match(vue, /touchend\.prevent\.stop="onOverlayClose"/)
+  assert.match(vue, /touchstart\.prevent\.stop="onOverlayGuard"/)
+  assert.doesNotMatch(vue, /touchstart\.prevent\.stop="close"/)
+  assert.doesNotMatch(vue, /univ-sort-layer/)
+  assert.doesNotMatch(vue, /UNIV_SORT_LAYER_ID/)
   assert.doesNotMatch(vue, /\.sort-menu-panel[^{]*\{[^}]*opacity:\s*0\.\d/)
+  const panelBlock = vue.match(/\.sort-menu-panel\s*\{[\s\S]*?\}/)
+  assert.ok(panelBlock)
+  assert.match(panelBlock[0], /background:\s*#ffffff/i)
+  assert.match(panelBlock[0], /opacity:\s*1/)
+  assert.doesNotMatch(panelBlock[0], /background:\s*rgba\(/)
 })
 
-test('university list CSS: first card not clipped; az inert when menu open', () => {
+test('university list CSS: first card uses list gap, not margin collapsing; az inert when menu open', () => {
   const css = fs.readFileSync(cssPath, 'utf8')
-  assert.match(css, /\.univ-list[\s\S]{0,180}padding:\s*10px/)
-  assert.match(css, /\.univ-card[\s\S]{0,280}margin:\s*0 0 10px/)
+  const listBlock = css.match(/\.univ-list\s*\{[\s\S]*?\}/)
+  assert.ok(listBlock, 'univ-list block')
+  assert.match(listBlock[0], /display:\s*flex/)
+  assert.match(listBlock[0], /flex-direction:\s*column/)
+  assert.match(listBlock[0], /gap:\s*10px/)
+  const cardBlock = css.match(/\.univ-card\s*\{[\s\S]*?\}/)
+  assert.ok(cardBlock, 'univ-card block')
+  assert.match(cardBlock[0], /margin:\s*0/)
+  assert.match(css, /\.univ-layout[\s\S]{0,220}padding-top:\s*8px/)
   assert.match(css, /\.univ-toolbar \.van-search[\s\S]{0,80}position:\s*static/)
   assert.match(css, /\.univ-az\.is-inert/)
   assert.match(css, /\.list-screen\.has-sort-menu \.univ-az/)
-  assert.match(css, /\.univ-sort-layer[\s\S]{0,160}z-index:\s*80/)
-  assert.match(css, /\.univ-screen[\s\S]{0,400}isolation:\s*isolate/)
   assert.match(css, /\.list-screen\.has-sort-menu \.mf-cell:not\(\.is-sort-open\)/)
   assert.match(css, /pointer-events:\s*none/)
-  const toolbarBlock = css.match(/\/\* Filter UX V2[\s\S]{0,400}\.univ-toolbar \{[\s\S]{0,180}\}/)
+  assert.match(css, /body\.gq-univ-sort-open \.van-dropdown-item/)
+  assert.doesNotMatch(css, /\.univ-sort-layer/)
+  const screenBlock = css.match(/\.univ-screen\s*\{[\s\S]*?\}/)
+  assert.ok(screenBlock, 'univ-screen block')
+  assert.doesNotMatch(screenBlock[0], /isolation:\s*isolate/)
+  const toolbarBlock = css.match(/\/\* Filter UX V2[\s\S]{0,500}\.univ-toolbar \{[\s\S]{0,180}\}/)
   assert.ok(toolbarBlock, 'toolbar block')
   assert.doesNotMatch(toolbarBlock[0], /position:\s*sticky/)
+})
+
+test('university DOM title exists; recommend sort keeps first school first', () => {
+  const app = fs.readFileSync(appVuePath, 'utf8')
+  assert.match(app, /#\{\{\s*school\.ranking\s*\}\} \{\{\s*school\.name\s*\}\}/)
+  assert.match(app, /class="univ-card-head"/)
+  assert.match(app, /teleport="body"/)
+  assert.doesNotMatch(app, /univ-sort-layer/)
+  assert.doesNotMatch(app, /UNIV_SORT_LAYER/)
+  const univSection = app.split("tab === 'universities'")[1]?.split("tab === 'schedule'")[0] || ''
+  assert.match(univSection, /van-dropdown-item teleport="body"/)
+  const scheduleSection = app.split("tab === 'schedule'")[1]?.split('</section>')[0] || ''
+  assert.doesNotMatch(scheduleSection, /teleport="body"/)
 })
 
 test('iPhone-width layout tokens exist for 390/393/430 class screens', () => {

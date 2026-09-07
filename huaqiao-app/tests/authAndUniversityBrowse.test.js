@@ -71,5 +71,7 @@ test('university browse search / az sort / letters', () => {
   assert.deepEqual(az, ['北京大学', '清华大学', '中山大学'])
   const browsed = browseUniversities(list, { query: '北京', sort: 'recommend' })
   assert.equal(browsed.items.length, 2)
+  assert.equal(browseUniversities(list, { sort: 'recommend' }).items[0].name, '清华大学')
+  assert.equal(browseUniversities(list, { sort: 'recommend' }).items[0].id, 1)
   assert.ok(SORT_OPTIONS.some((o) => o.value === 'az'))
 })
