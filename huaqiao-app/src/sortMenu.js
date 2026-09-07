@@ -23,11 +23,29 @@ export function applySortSelection(current, clicked) {
   }
 }
 
+export const UNIV_SORT_LAYER_ID = 'univ-sort-layer'
+
 export function universityChromeWhenMenuOpen(open) {
   return {
     overlay: !!open,
     azPointerEvents: open ? 'none' : 'auto',
     overlayPointerEvents: open ? 'auto' : 'none',
+    filterPointerEvents: open ? 'none' : 'auto',
+    toolbarSticky: open ? 'relative' : 'sticky',
+  }
+}
+
+/** Convert viewport rects into coordinates inside a host stacking layer. */
+export function relativeTriggerRect(triggerRect, hostRect) {
+  if (!triggerRect) return null
+  if (!hostRect) return triggerRect
+  return {
+    left: (triggerRect.left || 0) - (hostRect.left || 0),
+    right: (triggerRect.right || 0) - (hostRect.left || 0),
+    top: (triggerRect.top || 0) - (hostRect.top || 0),
+    bottom: (triggerRect.bottom || 0) - (hostRect.top || 0),
+    width: triggerRect.width || 0,
+    height: triggerRect.height || 0,
   }
 }
 

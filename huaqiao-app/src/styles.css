@@ -109,7 +109,7 @@ html.dark body { background: #0b1120; }
 .sticky-actions { position: sticky; bottom: calc(58px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr; gap: 10px; padding: 12px; background: linear-gradient(to top, rgba(238,243,251,.98), rgba(238,243,251,.78)); }
 .dark .sticky-actions { background: linear-gradient(to top, rgba(15,23,42,.98), rgba(15,23,42,.72)); }
 .list-screen .van-search, .list-screen .van-dropdown-menu { position: sticky; top: calc(46px + env(safe-area-inset-top, 0px)); z-index: 4; }
-/* University toolbar is the single sticky chrome; inner search/menus must not also stick or they clip card #1. */
+/* University toolbar is in-flow chrome; inner search/menus must not stick or they clip card #1. */
 .list-screen .univ-toolbar .van-search,
 .list-screen .univ-toolbar .van-dropdown-menu {
   position: static;
@@ -285,35 +285,55 @@ html.dark body { background: #0b1120; }
 }
 .mf-grid-schedule { margin: 0 0 8px; }
 
-/* Filter UX V2 — sticky labeled grid, no horizontal scroll */
+/* Filter UX V2 — labeled grid. Do NOT sticky+z-index the toolbar:
+   iOS Safari composites sticky layers above body-fixed / teleported menus,
+   which painted 全部地区/全部层级/全部领域 on top of the white SortMenu. */
 .univ-toolbar {
-  position: sticky;
-  top: calc(46px + env(safe-area-inset-top, 0px));
-  z-index: 6;
+  position: relative;
+  z-index: 2;
+  flex: none;
   background: #e4eaf4;
   padding-bottom: 8px;
 }
 .dark .univ-toolbar { background: #0b1120; }
 .mf-grid-schedule {
-  position: sticky;
-  top: calc(46px + env(safe-area-inset-top, 0px));
-  z-index: 5;
+  position: relative;
+  z-index: 2;
   background: #e4eaf4;
   padding: 8px 4px 6px;
 }
 .dark .mf-grid-schedule { background: #0b1120; }
 .van-dropdown-item {
-  z-index: 30 !important;
+  z-index: 10 !important;
+}
+.list-screen.has-sort-menu .van-dropdown-item {
+  z-index: 0 !important;
+  visibility: hidden;
+  pointer-events: none;
 }
 .van-dropdown-item__content {
   padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
 }
 .list-screen { max-width: 100vw; overflow-x: clip; }
+.univ-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 46px - env(safe-area-inset-top, 0px) - 64px - env(safe-area-inset-bottom, 0px) - 24px);
+  overflow: hidden;
+  isolation: isolate;
+}
 .univ-layout {
   position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .univ-list {
   flex: 1;
@@ -347,7 +367,7 @@ html.dark body { background: #0b1120; }
 .dark .univ-card-detail { color: #cbd5e1; }
 .univ-az {
   position: sticky;
-  top: calc(120px + env(safe-area-inset-top, 0px));
+  top: 8px;
   align-self: flex-start;
   display: flex;
   flex-direction: column;
@@ -357,7 +377,7 @@ html.dark body { background: #0b1120; }
   overflow-y: auto;
   padding: 4px 0;
   margin-left: -2px;
-  z-index: 3;
+  z-index: 1;
   opacity: 0.4;
   transition: opacity 0.25s ease;
   pointer-events: auto;
@@ -365,8 +385,21 @@ html.dark body { background: #0b1120; }
 }
 .univ-az.is-active { opacity: 0.95; }
 .univ-az.is-inert,
-.list-screen.has-sort-menu .univ-az {
+.list-screen.has-sort-menu .univ-az,
+.list-screen.has-sort-menu .univ-layout,
+.list-screen.has-sort-menu .mf-cell:not(.is-sort-open),
+.list-screen.has-sort-menu .univ-toolbar .van-search {
   pointer-events: none;
+}
+.univ-sort-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  isolation: isolate;
+}
+.list-screen.has-sort-menu .univ-sort-layer {
+  pointer-events: auto;
 }
 .univ-az-btn,
 .univ-az button {

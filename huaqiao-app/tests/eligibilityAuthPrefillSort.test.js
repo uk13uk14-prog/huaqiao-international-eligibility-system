@@ -16,6 +16,7 @@ import {
   SORT_MENU_OPTIONS,
   applySortSelection,
   panelStyleFromTriggerRect,
+  relativeTriggerRect,
   sortMenuLabel,
   universityChromeWhenMenuOpen,
 } from '../src/sortMenu.js'
@@ -150,12 +151,19 @@ test('sort dropdown selection and click-through prevention helpers', () => {
   assert.equal(openChrome.overlay, true)
   assert.equal(openChrome.azPointerEvents, 'none')
   assert.equal(openChrome.overlayPointerEvents, 'auto')
+  assert.equal(openChrome.filterPointerEvents, 'none')
   const closedChrome = universityChromeWhenMenuOpen(false)
   assert.equal(closedChrome.azPointerEvents, 'auto')
   assert.ok(SORT_MENU_OPTIONS.some((o) => o.value === 'az'))
   const style = panelStyleFromTriggerRect({ left: 20, bottom: 120, width: 80 }, { viewportWidth: 390 })
   assert.equal(style.top, '124px')
   assert.match(style.width, /16\dpx/)
+  const local = relativeTriggerRect(
+    { left: 100, bottom: 200, width: 80, top: 160, right: 180, height: 40 },
+    { left: 12, top: 80, width: 366 },
+  )
+  assert.equal(local.left, 88)
+  assert.equal(local.bottom, 120)
 })
 
 test('sort menu vue uses solid panel, overlay, and no container opacity', () => {
@@ -163,6 +171,8 @@ test('sort menu vue uses solid panel, overlay, and no container opacity', () => 
   assert.match(vue, /sort-menu-overlay/)
   assert.match(vue, /background:\s*#ffffff/i)
   assert.match(vue, /pointerdown\.prevent\.stop="close"/)
+  assert.match(vue, /UNIV_SORT_LAYER_ID/)
+  assert.doesNotMatch(vue, /Teleport to="body"/)
   assert.doesNotMatch(vue, /\.sort-menu-panel[^{]*\{[^}]*opacity:\s*0\.\d/)
 })
 
@@ -170,11 +180,16 @@ test('university list CSS: first card not clipped; az inert when menu open', () 
   const css = fs.readFileSync(cssPath, 'utf8')
   assert.match(css, /\.univ-list[\s\S]{0,180}padding:\s*10px/)
   assert.match(css, /\.univ-card[\s\S]{0,280}margin:\s*0 0 10px/)
-  assert.doesNotMatch(css, /\.univ-layout\s*\{[^}]*overflow-x:\s*hidden/)
   assert.match(css, /\.univ-toolbar \.van-search[\s\S]{0,80}position:\s*static/)
   assert.match(css, /\.univ-az\.is-inert/)
   assert.match(css, /\.list-screen\.has-sort-menu \.univ-az/)
+  assert.match(css, /\.univ-sort-layer[\s\S]{0,160}z-index:\s*80/)
+  assert.match(css, /\.univ-screen[\s\S]{0,400}isolation:\s*isolate/)
+  assert.match(css, /\.list-screen\.has-sort-menu \.mf-cell:not\(\.is-sort-open\)/)
   assert.match(css, /pointer-events:\s*none/)
+  const toolbarBlock = css.match(/\/\* Filter UX V2[\s\S]{0,400}\.univ-toolbar \{[\s\S]{0,180}\}/)
+  assert.ok(toolbarBlock, 'toolbar block')
+  assert.doesNotMatch(toolbarBlock[0], /position:\s*sticky/)
 })
 
 test('iPhone-width layout tokens exist for 390/393/430 class screens', () => {

@@ -257,7 +257,8 @@
         </van-cell-group>
       </section>
 
-      <section v-if="tab === 'universities'" class="list-screen" :class="{ 'has-sort-menu': sortMenuOpen }">
+      <section v-if="tab === 'universities'" class="list-screen univ-screen" :class="{ 'has-sort-menu': sortMenuOpen }">
+        <div :id="univSortLayerId" class="univ-sort-layer" />
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
           <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
@@ -588,6 +589,7 @@ import AuthGate from './AuthGate.vue'
 import { normalizeSaasUser } from './authSession.js'
 import { mergeEligibilityForm, mapStudentToEligibilityPrefills } from './eligibilityPrefill.js'
 import SortMenu from './SortMenu.vue'
+import { UNIV_SORT_LAYER_ID } from './sortMenu.js'
 import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 import CscaExamCenter from './CscaExamCenter.vue'
@@ -651,6 +653,7 @@ const univSearch = ref('')
 const univSort = ref('recommend')
 const univSortOptions = SORT_OPTIONS
 const sortMenuOpen = ref(false)
+const univSortLayerId = UNIV_SORT_LAYER_ID
 /** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
 const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']

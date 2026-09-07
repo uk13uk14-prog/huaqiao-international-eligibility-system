@@ -11,7 +11,7 @@
       <span class="sort-menu__value">{{ currentLabel }}</span>
       <span class="sort-menu__caret" aria-hidden="true">{{ open ? '▲' : '▼' }}</span>
     </button>
-    <Teleport to="body">
+    <Teleport :to="teleportTarget" :disabled="!teleportReady">
       <div
         v-if="open"
         class="sort-menu-overlay"
@@ -49,8 +49,15 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { applySortSelection, panelStyleFromTriggerRect, SORT_MENU_OPTIONS, sortMenuLabel } from './sortMenu.js'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  applySortSelection,
+  panelStyleFromTriggerRect,
+  relativeTriggerRect,
+  SORT_MENU_OPTIONS,
+  sortMenuLabel,
+  UNIV_SORT_LAYER_ID,
+} from './sortMenu.js'
 
 const props = defineProps({
   modelValue: { type: String, default: 'recommend' },
@@ -60,7 +67,9 @@ const emit = defineEmits(['update:modelValue', 'open-change'])
 
 const open = ref(false)
 const triggerEl = ref(null)
+const teleportReady = ref(false)
 const panelStyle = ref({ top: '0px', left: '0px', width: '160px' })
+const teleportTarget = computed(() => `#${UNIV_SORT_LAYER_ID}`)
 
 const resolvedOptions = computed(() => {
   const list = Array.isArray(props.options) && props.options.length ? props.options : SORT_MENU_OPTIONS
@@ -68,16 +77,26 @@ const resolvedOptions = computed(() => {
 })
 const currentLabel = computed(() => sortMenuLabel(props.modelValue, resolvedOptions.value))
 
+function hostRect() {
+  if (typeof document === 'undefined') return null
+  return document.getElementById(UNIV_SORT_LAYER_ID)?.getBoundingClientRect?.() || null
+}
+
 function placePanel() {
   const el = triggerEl.value
   const rect = el?.getBoundingClientRect?.()
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 390
-  panelStyle.value = panelStyleFromTriggerRect(rect, { viewportWidth: vw })
+  const host = hostRect()
+  const local = relativeTriggerRect(rect, host)
+  const vw = host?.width || (typeof window !== 'undefined' ? window.innerWidth : 390)
+  panelStyle.value = panelStyleFromTriggerRect(local, { viewportWidth: vw })
 }
 
 function setOpen(next) {
   const v = !!next
   if (open.value === v) return
+  if (v) {
+    teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
+  }
   open.value = v
   if (v) placePanel()
   emit('open-change', v)
@@ -101,8 +120,14 @@ function onViewportChange() {
   if (open.value) placePanel()
 }
 
+onMounted(async () => {
+  await nextTick()
+  teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
+})
+
 watch(open, (v) => {
   if (typeof window === 'undefined') return
+  teleportReady.value = typeof document !== 'undefined' && !!document.getElementById(UNIV_SORT_LAYER_ID)
   if (v) {
     window.addEventListener('resize', onViewportChange)
     window.addEventListener('scroll', onViewportChange, true)
@@ -143,9 +168,9 @@ html.dark .sort-menu__trigger { color: #e2e8f0; }
 .sort-menu.is-open .sort-menu__caret { color: #2563eb; }
 
 .sort-menu-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 80;
+  z-index: 1;
   background: transparent;
   pointer-events: auto;
   touch-action: none;
@@ -153,8 +178,8 @@ html.dark .sort-menu__trigger { color: #e2e8f0; }
 }
 
 .sort-menu-panel {
-  position: fixed;
-  z-index: 81;
+  position: absolute;
+  z-index: 2;
   box-sizing: border-box;
   background: #ffffff;
   opacity: 1;
