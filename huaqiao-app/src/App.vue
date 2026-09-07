@@ -1,4 +1,5 @@
 <template>
+  <PreviewBuildBadge />
   <div v-if="!authReady" class="auth-boot">正在恢复登录状态…</div>
   <AuthGate v-else-if="!saasUser" :dark-mode="darkMode" @authenticated="onAuthSuccess" />
   <div v-else :class="['mobile-app', darkMode ? 'dark' : 'light']">
@@ -585,6 +586,7 @@ import { api } from './api'
 import { isExpiredAuthStatus } from './authToken.js'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
 import AuthGate from './AuthGate.vue'
+import PreviewBuildBadge from './PreviewBuildBadge.vue'
 import { normalizeSaasUser } from './authSession.js'
 import { mergeEligibilityForm, mapStudentToEligibilityPrefills } from './eligibilityPrefill.js'
 import SortMenu from './SortMenu.vue'

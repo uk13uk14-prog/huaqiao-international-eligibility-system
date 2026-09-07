@@ -266,3 +266,14 @@ test('iPhone-width layout tokens exist for 390/393/430 class screens', () => {
     assert.ok(left + width <= w - 4, `${w} panel stays on screen`)
   }
 })
+
+test('preview build badge is gated by VITE_PREVIEW_DIAGNOSTIC and not shown by default', () => {
+  const badge = fs.readFileSync(path.resolve(here, '../src/PreviewBuildBadge.vue'), 'utf8')
+  const app = fs.readFileSync(appVuePath, 'utf8')
+  assert.match(badge, /PREVIEW BUILD/)
+  assert.match(badge, /VITE_PREVIEW_DIAGNOSTIC/)
+  assert.match(badge, /VITE_PREVIEW_HEAD/)
+  assert.match(badge, /z-index:\s*2147483647/)
+  assert.match(app, /PreviewBuildBadge/)
+  assert.doesNotMatch(badge, /userAgent|user-agent/)
+})
