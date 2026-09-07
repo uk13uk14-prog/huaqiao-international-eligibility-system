@@ -257,7 +257,7 @@
         </van-cell-group>
       </section>
 
-      <section v-if="tab === 'universities'" class="list-screen">
+      <section v-if="tab === 'universities'" class="list-screen" :class="{ 'has-sort-menu': sortMenuOpen }">
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
           <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
@@ -267,11 +267,14 @@
                 <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
               </van-dropdown-menu>
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-sort-open': sortMenuOpen }">
               <span class="mf-label">排序</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="univSort" :options="univSortMenuOptions" @change="onUnivBrowseChange" />
-              </van-dropdown-menu>
+              <SortMenu
+                :model-value="univSort"
+                :options="univSortMenuOptions"
+                @update:model-value="setUnivSort"
+                @open-change="onSortMenuOpenChange"
+              />
             </div>
             <div class="mf-cell">
               <span class="mf-label">地区</span>
@@ -322,7 +325,7 @@
           </div>
           <nav
             class="univ-az"
-            :class="{ 'is-active': azIndexActive }"
+            :class="{ 'is-active': azIndexActive, 'is-inert': sortMenuOpen }"
             aria-label="拼音首字母索引"
             @touchstart.passive="pulseAzIndex"
           >
@@ -579,9 +582,12 @@ import {
   syncStudentsAndActive,
 } from './activeStudent'
 import { api } from './api'
+import { isExpiredAuthStatus } from './authToken.js'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
 import AuthGate from './AuthGate.vue'
 import { normalizeSaasUser } from './authSession.js'
+import { mergeEligibilityForm, mapStudentToEligibilityPrefills } from './eligibilityPrefill.js'
+import SortMenu from './SortMenu.vue'
 import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 import CscaExamCenter from './CscaExamCenter.vue'
@@ -644,6 +650,7 @@ const saasBusy = ref(false)
 const univSearch = ref('')
 const univSort = ref('recommend')
 const univSortOptions = SORT_OPTIONS
+const sortMenuOpen = ref(false)
 /** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
 const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
@@ -1043,6 +1050,9 @@ async function onAuthSuccess(user) {
 function onUnivBrowseChange() {
   univBrowseTick.value += 1
 }
+function onSortMenuOpenChange(open) {
+  sortMenuOpen.value = !!open
+}
 function setUnivSort(v) {
   univSort.value = v
   onUnivBrowseChange()
@@ -1334,13 +1344,39 @@ function openLawsPolicy() {
   openPage('laws')
 }
 
-function openJudge(type, prefills) {
+async function loadFormalStudentForPrefill() {
+  if (!getSaasToken()) return null
+  let sid = normalizeStudentId(activeStudentId.value)
+  if (!sid) {
+    try {
+      const r = await saasApi.students()
+      syncStudentsAndActive(r.students || [])
+      sid = normalizeStudentId(activeStudentId.value)
+    } catch {
+      return null
+    }
+  }
+  if (!sid) return null
+  try {
+    const student = await saasApi.student(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return null
+    return student
+  } catch {
+    return null
+  }
+}
+
+async function openJudge(type, prefills) {
   eligibilityContext.value = type
   judgeType.value = type
   judgeStep.value = 0
   denationalizationInfo.value = ''
-  form.value = { ...defaultForm(type), ...(prefills || {}) }
+  form.value = mergeEligibilityForm(defaultForm(type), { draft: prefills })
   pushTab('judge')
+  const student = await loadFormalStudentForPrefill()
+  if (!student) return
+  const fromProfile = mapStudentToEligibilityPrefills(student)
+  form.value = mergeEligibilityForm(defaultForm(type), { draft: prefills, profile: fromProfile })
 }
 
 function onGotoJudgeFromProfile(payload) {
@@ -1419,6 +1455,12 @@ async function submitJudge() {
     await loadRecords()
     showSuccessToast('判定完成')
   } catch (error) {
+    if (isExpiredAuthStatus(error?.status)) {
+      setSaasToken('')
+      saasUser.value = null
+      showFailToast(error.message || '请先登录')
+      return
+    }
     showFailToast(error.message)
   } finally {
     toast.close()

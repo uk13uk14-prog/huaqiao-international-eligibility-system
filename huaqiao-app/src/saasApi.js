@@ -1,3 +1,7 @@
+import { buildAuthHeaders, getSaasToken, setSaasToken } from './authToken.js'
+
+export { getSaasToken, setSaasToken }
+
 const SAAS_BASE = (import.meta.env.VITE_SAAS_API || '/saas-api').replace(/\/$/, '')
 
 function url(path) {
@@ -6,12 +10,7 @@ function url(path) {
 }
 
 function authHeaders(extra = {}) {
-  const t = localStorage.getItem('saas_token') || ''
-  return {
-    'Content-Type': 'application/json',
-    ...(t ? { Authorization: `Bearer ${t}` } : {}),
-    ...extra,
-  }
+  return buildAuthHeaders(extra)
 }
 
 async function saasRequest(path, options = {}) {
@@ -40,15 +39,6 @@ async function saasRequest(path, options = {}) {
   const ct = response.headers.get('content-type') || ''
   if (ct.includes('application/json')) return response.json()
   return response.text()
-}
-
-export function setSaasToken(token) {
-  if (token) localStorage.setItem('saas_token', token)
-  else localStorage.removeItem('saas_token')
-}
-
-export function getSaasToken() {
-  return localStorage.getItem('saas_token') || ''
 }
 
 export const saasApi = {
