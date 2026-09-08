@@ -59,6 +59,7 @@ import {
   applyFilterSelection,
   armOverlayGhostClickGuard,
   filterMenuLabel,
+  lockPageScroll,
   nextActiveMenu,
   normalizeFilterOptions,
   panelStyleFromTriggerRect,
@@ -76,6 +77,7 @@ const emit = defineEmits(['update:modelValue', 'update:activeId', 'select', 'clo
 const triggerEl = ref(null)
 const panelStyle = ref({ top: '0px', left: '0px', width: '168px' })
 let disarmGhost = null
+let unlockPageScroll = null
 
 const open = computed(() => props.activeId === props.menuId)
 const resolvedOptions = computed(() => normalizeFilterOptions(props.options))
@@ -127,9 +129,13 @@ watch(open, (v) => {
   if (typeof window === 'undefined') return
   if (v) {
     nextTick(() => placePanel())
+    unlockPageScroll?.()
+    unlockPageScroll = lockPageScroll()
     window.addEventListener('resize', onViewportChange)
     window.addEventListener('scroll', onViewportChange, true)
   } else {
+    unlockPageScroll?.()
+    unlockPageScroll = null
     window.removeEventListener('resize', onViewportChange)
     window.removeEventListener('scroll', onViewportChange, true)
   }
@@ -137,6 +143,8 @@ watch(open, (v) => {
 
 onBeforeUnmount(() => {
   disarmGhost?.()
+  unlockPageScroll?.()
+  unlockPageScroll = null
   if (typeof window === 'undefined') return
   window.removeEventListener('resize', onViewportChange)
   window.removeEventListener('scroll', onViewportChange, true)
@@ -180,7 +188,9 @@ html.dark .mfm-trigger { color: #e2e8f0; }
   z-index: 10001;
   box-sizing: border-box;
   max-height: min(60vh, 420px);
-  overflow: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: #ffffff;
   opacity: 1;
   border: 1px solid #e2e8f0;

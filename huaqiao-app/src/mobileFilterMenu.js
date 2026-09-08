@@ -6,6 +6,7 @@ export const FILTER_OVERLAY_Z_INDEX = 10000
 export const FILTER_MENU_Z_INDEX = 10001
 
 export const UNIV_FILTER_IDS = ['target', 'sort', 'province', 'tag', 'field']
+export const TIMELINE_FILTER_IDS = ['identity', 'month', 'region', 'level', 'feature']
 
 export const IDENTITY_MENU_OPTIONS = [
   { label: '国际生', value: 'international' },
@@ -54,6 +55,40 @@ export function universityPaintWhenFilterOpen(open) {
     azPointerEvents: open ? 'none' : 'auto',
     pagePointerEvents: open ? 'none' : 'auto',
     onlyOneMenu: true,
+    bodyScrollLocked: !!open,
+  }
+}
+
+export function timelinePaintWhenFilterOpen(open) {
+  return {
+    listDisplay: open ? 'none' : '',
+    filterInnerDisplay: open ? 'none' : '',
+    pagePointerEvents: open ? 'none' : 'auto',
+    onlyOneMenu: true,
+    bodyScrollLocked: !!open,
+  }
+}
+
+export function lockPageScroll(doc = typeof document !== 'undefined' ? document : null) {
+  if (!doc?.body) return () => {}
+  const html = doc.documentElement
+  const body = doc.body
+  const prevHtmlOverflow = html?.style?.overflow
+  const prevBodyOverflow = body.style.overflow
+  if (html) html.style.overflow = 'hidden'
+  body.style.overflow = 'hidden'
+  body.classList.add('native-filter-menu-open')
+  const onTouchMove = (e) => {
+    const t = e.target
+    if (t && typeof t.closest === 'function' && t.closest('.mfm-panel')) return
+    if (typeof e.preventDefault === 'function') e.preventDefault()
+  }
+  doc.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
+  return () => {
+    if (html) html.style.overflow = prevHtmlOverflow || ''
+    body.style.overflow = prevBodyOverflow || ''
+    body.classList.remove('native-filter-menu-open')
+    doc.removeEventListener('touchmove', onTouchMove, { capture: true })
   }
 }
 

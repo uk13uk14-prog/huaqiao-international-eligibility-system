@@ -374,38 +374,68 @@
         </div>
       </section>
 
-      <section v-if="tab === 'schedule'" class="list-screen">
+      <section v-if="tab === 'schedule'" class="list-screen schedule-screen" :class="{ 'schedule-filter-menu-open': timelineMenuOpen }">
         <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <div class="mf-grid mf-grid-schedule" role="toolbar" aria-label="招生时间轴筛选">
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'identity' }">
             <span class="mf-label">身份</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="identity"
+              title="身份"
+              :model-value="targetFilter"
+              :options="targetOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineIdentitySelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'month' }">
             <span class="mf-label">月份</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="month"
+              title="月份"
+              :model-value="monthFilter"
+              :options="monthOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineMonthSelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'region' }">
             <span class="mf-label">地区</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="region"
+              title="地区"
+              :model-value="scheduleProvinceFilter"
+              :options="provinceOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineRegionSelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'level' }">
             <span class="mf-label">层级</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="level"
+              title="院校层级"
+              :model-value="scheduleTagFilter"
+              :options="tagOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineLevelSelect"
+            />
           </div>
-          <div class="mf-cell mf-cell-wide">
+          <div class="mf-cell mf-cell-wide" :class="{ 'is-menu-open': timelineActiveMenu === 'feature' }">
             <span class="mf-label">特色</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="feature"
+              title="特色"
+              :model-value="scheduleFeatureFilter"
+              :options="featureOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineFeatureSelect"
+            />
           </div>
         </div>
         <van-empty v-if="!schedules.length" description="暂无招生时间轴数据，可调整筛选或稍后重试" />
@@ -686,6 +716,8 @@ const univSearch = ref('')
 const univSort = ref('recommend')
 const univActiveMenu = ref('')
 const univMenuOpen = computed(() => !!univActiveMenu.value)
+const timelineActiveMenu = ref('')
+const timelineMenuOpen = computed(() => !!timelineActiveMenu.value)
 const univIdentityMenuOptions = IDENTITY_MENU_OPTIONS
 const univSortMenuOptions = SORT_MENU_OPTIONS
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
@@ -710,8 +742,10 @@ const univAzLetters = computed(() => {
 const univAzPresent = computed(() => new Set(univAzLetters.value))
 watch(univSort, () => { ensureUnivSortMenuValue() })
 watch(univActiveMenu, () => { syncUnivMenuBodyClass() })
+watch(timelineActiveMenu, () => { syncTimelineMenuBodyClass() })
 watch(tab, () => {
   if (univActiveMenu.value) onUnivActiveMenu('')
+  if (timelineActiveMenu.value) onTimelineActiveMenu('')
 })
 
 /** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
@@ -1094,8 +1128,22 @@ function syncUnivMenuBodyClass() {
   document.body.classList.toggle('univ-filter-menu-open', !!univActiveMenu.value)
 }
 
+function syncTimelineMenuBodyClass() {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('schedule-filter-menu-open', !!timelineActiveMenu.value)
+}
+
 function onUnivActiveMenu(id) {
   univActiveMenu.value = id || ''
+  if (univActiveMenu.value) timelineActiveMenu.value = ''
+  syncUnivMenuBodyClass()
+  syncTimelineMenuBodyClass()
+}
+
+function onTimelineActiveMenu(id) {
+  timelineActiveMenu.value = id || ''
+  if (timelineActiveMenu.value) univActiveMenu.value = ''
+  syncTimelineMenuBodyClass()
   syncUnivMenuBodyClass()
 }
 
@@ -1165,6 +1213,30 @@ function onUnivListScroll() {
 }
 function closeUnivFilterMenu() {
   onUnivActiveMenu('')
+}
+function closeTimelineFilterMenu() {
+  onTimelineActiveMenu('')
+}
+
+function onTimelineIdentitySelect(v) {
+  targetFilter.value = v
+  onTargetFilterChangeSchedule()
+}
+function onTimelineMonthSelect(v) {
+  monthFilter.value = v
+  loadSchedules()
+}
+function onTimelineRegionSelect(v) {
+  scheduleProvinceFilter.value = v
+  loadSchedules()
+}
+function onTimelineLevelSelect(v) {
+  scheduleTagFilter.value = v
+  loadSchedules()
+}
+function onTimelineFeatureSelect(v) {
+  scheduleFeatureFilter.value = v
+  loadSchedules()
 }
 
 async function doSaasLogin() {
@@ -1591,6 +1663,7 @@ async function loadRecords() {
 
 async function onTabChange(name = tab.value) {
   closeUnivFilterMenu()
+  closeTimelineFilterMenu()
   if (!historyStack.value.includes(name)) historyStack.value.push(name)
   if (name === 'universities' || name === 'schedule') {
     targetFilter.value = eligibilityContext.value
@@ -1643,6 +1716,8 @@ async function saveResultImage() {
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.body.classList.remove('univ-filter-menu-open')
+    document.body.classList.remove('schedule-filter-menu-open')
+    document.body.classList.remove('native-filter-menu-open')
     document.body.classList.remove('gq-univ-sort-open')
     document.body.classList.remove('gq-univ-menu-open')
   }

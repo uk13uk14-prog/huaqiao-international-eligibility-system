@@ -255,8 +255,11 @@ test('university DOM title exists; recommend sort keeps first school first', () 
   assert.doesNotMatch(univSection, /van-dropdown-menu/)
   assert.doesNotMatch(univSection, /van-dropdown-item/)
   assert.doesNotMatch(univSection, /van-popup/)
-  const scheduleSection = app.split("tab === 'schedule'")[1]?.split('</section>')[0] || ''
-  assert.match(scheduleSection, /van-dropdown-menu/)
+  const scheduleSection = app.split("tab === 'schedule'")[1]?.split("tab === 'history'")[0] || ''
+  assert.doesNotMatch(scheduleSection, /van-dropdown-menu/)
+  assert.doesNotMatch(scheduleSection, /van-dropdown-item/)
+  assert.match(scheduleSection, /MobileFilterMenu/)
+  assert.match(scheduleSection, /timelineActiveMenu/)
 })
 
 test('iPhone-width layout tokens exist for 390/393/430 class screens', () => {
