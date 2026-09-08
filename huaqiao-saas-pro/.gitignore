@@ -6,3 +6,4 @@ saas_pro.db
 node_modules/
 dist/
 .DS_Store
+var/

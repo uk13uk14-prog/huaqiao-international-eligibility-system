@@ -91,6 +91,7 @@
           <van-grid-item icon="edit" text="CSCA考试" @click="openPage('csca')" />
           <van-grid-item icon="records-o" text="历史记录" @click="openPage('history')" />
           <van-grid-item icon="vip-card-o" text="会员中心" @click="openPage('member')" />
+          <van-grid-item icon="friends-o" text="合作中心" @click="openPage('cooperation')" />
           <van-grid-item icon="service-o" text="一对一规划咨询" @click="openConsultWithGate" />
         </van-grid>
       </section>
@@ -229,6 +230,10 @@
 
       <section v-if="tab === 'csca'" class="list-screen">
         <CscaExamCenter @goto-profile="openPage('profile')" @goto-timeline="openPage('profile')" />
+      </section>
+
+      <section v-if="tab === 'cooperation'" class="list-screen coop-screen">
+        <CooperationCenter />
       </section>
 
       <section v-if="tab === 'laws'" class="list-screen laws-screen">
@@ -656,6 +661,7 @@ import { IDENTITY_MENU_OPTIONS, SORT_MENU_OPTIONS } from './mobileFilterMenu.js'
 import { browseUniversities, pinyinInitial } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 import CscaExamCenter from './CscaExamCenter.vue'
+import CooperationCenter from './CooperationCenter.vue'
 
 const VAULT_LOCAL_KEY = 'hq_customer_vault_v1'
 
@@ -892,7 +898,7 @@ const monthOptions = [{ text: '全部月份', value: '' }, ...Array.from({ lengt
 const pendingLawScroll = ref(null)
 
 const form = ref(defaultForm('international'))
-const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', csca: 'CSCA考试中心', notifications: '通知中心' }[tab.value]))
+const navTitle = computed(() => ({ home: '国际生/华侨生资格判定', judge: judgeType.value === 'huaqiao' ? '华侨生判定' : '国际生判定', result: '判定结果', laws: '政策与法规', universities: '大学库', schedule: '招生时间轴', member: '会员中心', history: '历史记录', profile: '学生档案', csca: 'CSCA考试中心', cooperation: '合作中心', notifications: '通知中心' }[tab.value]))
 const judgeTypeLabel = computed(() => judgeType.value === 'huaqiao' ? '华侨生' : '国际生')
 
 watch(targetFilter, (v) => { eligibilityContext.value = v })
@@ -1073,6 +1079,22 @@ async function openNotifItem(n) {
 }
 
 
+function syncCooperationHash(name) {
+  if (typeof location === 'undefined') return
+  if (name === 'cooperation') {
+    if (location.hash !== '#/cooperation') location.hash = '#/cooperation'
+    return
+  }
+  if (location.hash === '#/cooperation') location.hash = ''
+}
+
+function openCooperationFromLocation() {
+  if (typeof location === 'undefined') return false
+  const hash = (location.hash || '').replace(/^#/, '')
+  const path = location.pathname || ''
+  return hash === '/cooperation' || /\/cooperation\/?$/.test(path)
+}
+
 function openPage(name) {
   if (name === 'universities' || name === 'schedule') {
     targetFilter.value = eligibilityContext.value
@@ -1081,6 +1103,7 @@ function openPage(name) {
     refreshStudentSwitcher()
   }
   pushTab(name)
+  syncCooperationHash(name)
   onTabChange(name)
 }
 
@@ -1535,9 +1558,11 @@ function goBack() {
   if (historyStack.value.length > 1) {
     historyStack.value.pop()
     tab.value = historyStack.value.at(-1) || 'home'
+    syncCooperationHash(tab.value)
     return
   }
   tab.value = 'home'
+  syncCooperationHash(tab.value)
 }
 
 function touchStart(event) { touchX.value = event.changedTouches[0].clientX }
@@ -1738,6 +1763,7 @@ onMounted(async () => {
     }
   } finally {
     authReady.value = true
+    if (openCooperationFromLocation()) openPage('cooperation')
   }
 })
 </script>

@@ -62,6 +62,14 @@ ADMIN_V1_CONTRACT = [
     "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/approve",
     "POST /api/admin/v1/students/{student_id}/ai-drafts/{draft_id}/publish",
     "GET /api/admin/v1/staff",
+    "GET /api/admin/v1/cooperation/settings",
+    "PATCH /api/admin/v1/cooperation/settings",
+    "GET /api/admin/v1/cooperation/brands",
+    "POST /api/admin/v1/cooperation/brands",
+    "PATCH /api/admin/v1/cooperation/brands/{brand_id}",
+    "DELETE /api/admin/v1/cooperation/brands/{brand_id}",
+    "POST /api/admin/v1/cooperation/brands/reorder",
+    "POST /api/admin/v1/cooperation/upload",
 ]
 
 

@@ -519,3 +519,42 @@ body.schedule-filter-menu-open .trial-badge {
   color: #64748b;
   font-size: 14px;
 }
+
+.coop-page { overflow-x: hidden; max-width: 100%; }
+.coop-title { margin: 0 0 8px; font-size: 20px; line-height: 1.35; word-break: break-word; }
+.coop-lead { margin: 0; font-size: 14px; line-height: 1.7; color: #334155; word-break: break-word; overflow-wrap: anywhere; }
+.coop-block-title { margin: 0 0 10px; font-size: 16px; }
+.coop-line {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  min-width: 0;
+}
+.coop-line span { flex: none; color: #64748b; width: 52px; }
+.coop-line b, .coop-line a {
+  min-width: 0;
+  font-weight: 600;
+  color: #14213d;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.coop-note { margin: 8px 0 0; font-size: 13px; color: #64748b; line-height: 1.6; word-break: break-word; }
+.coop-qr { margin-top: 12px; text-align: center; }
+.coop-qr img { width: min(180px, 56vw); height: auto; background: #fff; border-radius: 12px; }
+.coop-brands { margin-top: 4px; }
+.coop-brand-head { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.coop-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex: none;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+}
+.coop-brand-copy { min-width: 0; flex: 1; }
+.coop-brand-name { margin: 0; font-size: 16px; line-height: 1.4; word-break: break-word; }
+.coop-brand-desc { margin: 6px 0 0; font-size: 13px; color: #475569; line-height: 1.55; word-break: break-word; overflow-wrap: anywhere; }
+.coop-brand-link { display: inline-block; margin-top: 8px; font-size: 13px; color: #2563eb; }

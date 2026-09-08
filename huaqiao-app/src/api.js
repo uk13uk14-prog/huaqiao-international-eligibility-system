@@ -43,4 +43,5 @@ export const api = {
     }).catch(() => {})
   },
   submitConsultation: (data) => request('/api/consultation', { method: 'POST', body: JSON.stringify(data) }),
+  cooperation: () => request('/api/cooperation'),
 }

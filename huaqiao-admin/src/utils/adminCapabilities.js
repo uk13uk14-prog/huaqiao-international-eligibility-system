@@ -36,6 +36,8 @@ const SUPER_ADMIN_CAPS = Object.freeze([
   'audit.read',
   'settings.read',
   'settings.write',
+  'cooperation.read',
+  'cooperation.write',
 ])
 
 const OPERATIONS_ADMIN_CAPS = Object.freeze(

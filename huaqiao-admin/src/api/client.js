@@ -178,4 +178,43 @@ export const api = {
     request(`/api/admin/v1/notifications/${id}/popup-shown`, { method: 'POST' }),
   notificationSchedulerTick: () =>
     request('/api/admin/v1/notifications/scheduler/tick', { method: 'POST' }),
+  cooperationSettings: () => request('/api/admin/v1/cooperation/settings'),
+  patchCooperationSettings: (data) =>
+    request('/api/admin/v1/cooperation/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  cooperationBrands: () => request('/api/admin/v1/cooperation/brands'),
+  createCooperationBrand: (data) =>
+    request('/api/admin/v1/cooperation/brands', { method: 'POST', body: JSON.stringify(data) }),
+  patchCooperationBrand: (id, data) =>
+    request(`/api/admin/v1/cooperation/brands/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCooperationBrand: (id) =>
+    request(`/api/admin/v1/cooperation/brands/${id}`, { method: 'DELETE' }),
+  reorderCooperationBrands: (ids) =>
+    request('/api/admin/v1/cooperation/brands/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
+  async uploadCooperationImage(file) {
+    const headers = {}
+    const token = getToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const body = new FormData()
+    body.append('file', file)
+    let res
+    try {
+      res = await fetch(url('/api/admin/v1/cooperation/upload'), { method: 'POST', headers, body })
+    } catch (e) {
+      throw new ApiError('无法连接服务器，请稍后重试', { status: 0, code: 'network', cause: e })
+    }
+    const text = await res.text()
+    let data = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = { detail: text }
+    }
+    if (!res.ok) {
+      throw new ApiError(data?.detail || `上传失败（HTTP ${res.status}）`, { status: res.status, code: 'http' })
+    }
+    return data
+  },
 }

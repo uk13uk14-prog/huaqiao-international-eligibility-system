@@ -377,3 +377,41 @@ class NotificationPreference(Base):
     timezone = Column(String(64), default="Asia/Shanghai")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Cooperation Center V1
+# ---------------------------------------------------------------------------
+
+class CooperationSettings(Base):
+    """Singleton page config for H5 合作中心 (id=1)."""
+    __tablename__ = "cooperation_settings"
+    id = Column(Integer, primary_key=True)
+    page_title = Column(String(120), default="合作中心")
+    intro = Column(Text, default="")
+    contact_name = Column(String(80), default="")
+    wechat = Column(String(80), default="")
+    phone = Column(String(80), default="")
+    email = Column(String(160), default="")
+    contact_note = Column(Text, default="")
+    qr_image_url = Column(String(500), default="")
+    show_contact_name = Column(Boolean, default=True)
+    show_wechat = Column(Boolean, default=True)
+    show_phone = Column(Boolean, default=True)
+    show_email = Column(Boolean, default=True)
+    show_contact_note = Column(Boolean, default=True)
+    show_qr = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CooperationBrand(Base):
+    __tablename__ = "cooperation_brands"
+    id = Column(Integer, primary_key=True)
+    brand_name = Column(String(160), nullable=False, default="")
+    logo_url = Column(String(500), default="")
+    description = Column(Text, default="")
+    link = Column(String(400), default="")
+    sort_order = Column(Integer, default=0, index=True)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

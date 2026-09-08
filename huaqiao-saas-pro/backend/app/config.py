@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # Production recovery: skip seed_data on startup (deploy scripts set GUOQIAO_SKIP_SEED=1).
     # Default False preserves normal dev/test seed behavior.
     guoqiao_skip_seed: bool = False
+    cooperation_upload_dir: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig")
 
