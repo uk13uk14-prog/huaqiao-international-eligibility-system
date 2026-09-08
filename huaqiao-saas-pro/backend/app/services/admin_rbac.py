@@ -48,6 +48,8 @@ ALL_CAPABILITIES = frozenset(
         "audit.read",
         "settings.read",
         "settings.write",
+        "cooperation.read",
+        "cooperation.write",
         "admin.login",
     }
 )
@@ -93,6 +95,8 @@ ROLE_CAPABILITIES: dict[AdminConsoleRole, frozenset[str]] = {
             "ai.publish",
             "audit.read",
             "settings.read",
+            "cooperation.read",
+            "cooperation.write",
         }
     ),
     AdminConsoleRole.CONSULTANT: frozenset(
@@ -264,6 +268,7 @@ def menu_for(user: User) -> list[dict]:
     add("员工与组织", "/audit", "操作日志", "audit.read")
     add("AI 中心", "/ai/queue", "AI 审核队列", "ai.review")
     add("AI 中心", "/m/ai", "AI 助手", "ai.generate")
+    add("内容运营", "/cooperation", "合作管理", "cooperation.read")
     add("系统", "/settings", "系统设置", "settings.read")
     if "settings.write" in caps:
         add("系统", "/settings", "系统设置", "settings.write")

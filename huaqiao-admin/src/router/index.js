@@ -17,6 +17,7 @@ import RolesView from '../views/RolesView.vue'
 import AuditLogView from '../views/AuditLogView.vue'
 import MyStudentsView from '../views/MyStudentsView.vue'
 import FollowUpCenterView from '../views/FollowUpCenterView.vue'
+import CooperationView from '../views/CooperationView.vue'
 import MobileHomeView from '../mobile/MobileHomeView.vue'
 import MobileStudentsView from '../mobile/MobileStudentsView.vue'
 import MobileStudent360View from '../mobile/MobileStudent360View.vue'
@@ -42,6 +43,7 @@ const router = createRouter({
         { path: 'students/:studentId', component: Student360View, props: true },
         { path: 'consultations', component: ConsultationsView },
         { path: 'settings', component: SettingsView },
+        { path: 'cooperation', component: CooperationView },
         { path: 'employees', component: EmployeesView },
         { path: 'consultants', component: ConsultantsView },
         { path: 'consultants/:consultantId', component: Consultant360View, props: true },

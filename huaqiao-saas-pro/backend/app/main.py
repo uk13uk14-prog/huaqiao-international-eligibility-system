@@ -70,10 +70,14 @@ from .student_api import router as student_router
 from .admin_v1_api import router as admin_v1_router
 from .admin_v2_api import router as admin_v2_router
 from .notification_api import router as notification_router
+from .cooperation_api import admin_router as cooperation_admin_router
+from .cooperation_api import public_router as cooperation_public_router
 app.include_router(student_router)
 app.include_router(admin_v1_router)
 app.include_router(admin_v2_router)
 app.include_router(notification_router)
+app.include_router(cooperation_public_router)
+app.include_router(cooperation_admin_router)
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)

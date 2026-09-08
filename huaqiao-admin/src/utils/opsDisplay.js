@@ -275,6 +275,8 @@ export const CAPABILITY_ZH = {
   'audit.read': '查看操作日志',
   'settings.read': '查看设置',
   'settings.write': '修改系统设置',
+  'cooperation.read': '查看合作管理',
+  'cooperation.write': '编辑合作管理',
 }
 
 export function roleLabel(role) {

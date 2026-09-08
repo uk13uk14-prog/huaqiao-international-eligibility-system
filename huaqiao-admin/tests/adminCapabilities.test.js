@@ -7,7 +7,7 @@ import {
   permissionsFor,
   resolveConsoleRole,
 } from '../src/utils/adminCapabilities.js'
-import { human, identityPairLabel, planCodeLabel } from '../src/utils/opsDisplay.js'
+import { capabilityLabel, human, identityPairLabel, planCodeLabel } from '../src/utils/opsDisplay.js'
 
 const legacyAdminMe = {
   console_role: 'super_admin',
@@ -63,4 +63,12 @@ test('NOT_ASSESSED_HUMANIZED', () => {
 test('PRO_TRIAL_HUMANIZED', () => {
   assert.equal(planCodeLabel('pro_trial'), '7天 Pro 体验')
   assert.equal(human('pro_trial'), '7天 Pro 体验')
+})
+
+test('COOPERATION_CAPS_SUPER_AND_OPS_ONLY', () => {
+  assert.equal(canCapability(legacyAdminMe, 'cooperation.write'), true)
+  assert.equal(canCapability({ console_role: 'operations_admin', user: { role: 'operations_admin' } }, 'cooperation.write'), true)
+  assert.equal(canCapability({ console_role: 'consultant', user: { role: 'consultant' } }, 'cooperation.write'), false)
+  assert.equal(canCapability({ console_role: 'support', user: { role: 'support' } }, 'cooperation.read'), false)
+  assert.equal(capabilityLabel('cooperation.write'), '编辑合作管理')
 })
