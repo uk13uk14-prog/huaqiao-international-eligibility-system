@@ -1,4 +1,5 @@
 <template>
+  <PreviewBuildBadge />
   <div v-if="!authReady" class="auth-boot">正在恢复登录状态…</div>
   <AuthGate v-else-if="!saasUser" :dark-mode="darkMode" @authenticated="onAuthSuccess" />
   <div v-else :class="['mobile-app', darkMode ? 'dark' : 'light']">
@@ -257,44 +258,77 @@
         </van-cell-group>
       </section>
 
-      <section v-if="tab === 'universities'" class="list-screen">
+      <section v-if="tab === 'universities'" class="list-screen univ-screen" :class="{ 'univ-filter-menu-open': univMenuOpen }">
         <div class="univ-toolbar">
           <van-search v-model="univSearch" placeholder="搜索校名 / 城市 / 优势专业" shape="round" @update:model-value="onUnivBrowseChange" />
           <div class="mf-grid" role="toolbar" aria-label="院校筛选与排序">
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univActiveMenu === 'target' }">
               <span class="mf-label">身份</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onUnivTargetDropdown" />
-              </van-dropdown-menu>
+              <MobileFilterMenu
+                menu-id="target"
+                title="身份"
+                :model-value="targetFilter"
+                :options="univIdentityMenuOptions"
+                :active-id="univActiveMenu"
+                @update:active-id="onUnivActiveMenu"
+                @update:model-value="setUnivTarget"
+              />
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univActiveMenu === 'sort' }">
               <span class="mf-label">排序</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="univSort" :options="univSortMenuOptions" @change="onUnivBrowseChange" />
-              </van-dropdown-menu>
+              <MobileFilterMenu
+                menu-id="sort"
+                title="排序"
+                :model-value="univSort"
+                :options="univSortMenuOptions"
+                :active-id="univActiveMenu"
+                @update:active-id="onUnivActiveMenu"
+                @update:model-value="setUnivSort"
+              />
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univActiveMenu === 'province' }">
               <span class="mf-label">地区</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="provinceFilter" :options="provinceOptions" @change="loadUniversities" />
-              </van-dropdown-menu>
+              <MobileFilterMenu
+                menu-id="province"
+                title="地区"
+                :model-value="provinceFilter"
+                :options="provinceOptions"
+                :active-id="univActiveMenu"
+                @update:active-id="onUnivActiveMenu"
+                @update:model-value="onUnivProvinceSelect"
+              />
             </div>
-            <div class="mf-cell">
+            <div class="mf-cell" :class="{ 'is-menu-open': univActiveMenu === 'tag' }">
               <span class="mf-label">院校类型</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="tagFilter" :options="tagOptions" @change="loadUniversities" />
-              </van-dropdown-menu>
+              <MobileFilterMenu
+                menu-id="tag"
+                title="院校类型"
+                :model-value="tagFilter"
+                :options="tagOptions"
+                :active-id="univActiveMenu"
+                @update:active-id="onUnivActiveMenu"
+                @update:model-value="onUnivTagSelect"
+              />
             </div>
-            <div class="mf-cell mf-cell-wide">
+            <div class="mf-cell mf-cell-wide" :class="{ 'is-menu-open': univActiveMenu === 'field' }">
               <span class="mf-label">专业</span>
-              <van-dropdown-menu class="mf-menu">
-                <van-dropdown-item v-model="univFieldFilter" :options="univFieldOptions" @change="loadUniversities" />
-              </van-dropdown-menu>
+              <MobileFilterMenu
+                menu-id="field"
+                title="专业"
+                :model-value="univFieldFilter"
+                :options="univFieldOptions"
+                :active-id="univActiveMenu"
+                @update:active-id="onUnivActiveMenu"
+                @update:model-value="onUnivFieldSelect"
+              />
             </div>
           </div>
+        </div>
+        <div class="univ-results">
           <p class="univ-count">显示 {{ browsedUniversities.length }} / API {{ universities.length }} 所</p>
           <p v-if="universities.length && universities[0]?.locked_notice" class="locked-notice">{{ universities[0].locked_notice }}</p>
         </div>
+        <div class="univ-list-spacer" aria-hidden="true" />
         <div class="univ-layout">
           <div ref="univListEl" class="univ-list" @scroll.passive="onUnivListScroll">
             <van-empty v-if="!browsedUniversities.length" description="暂无匹配院校，可调整搜索或筛选" />
@@ -322,7 +356,9 @@
           </div>
           <nav
             class="univ-az"
-            :class="{ 'is-active': azIndexActive }"
+            :class="{ 'is-active': azIndexActive, 'is-inert': univMenuOpen }"
+            :inert="univMenuOpen"
+            :aria-hidden="univMenuOpen ? 'true' : 'false'"
             aria-label="拼音首字母索引"
             @touchstart.passive="pulseAzIndex"
           >
@@ -338,38 +374,68 @@
         </div>
       </section>
 
-      <section v-if="tab === 'schedule'" class="list-screen">
+      <section v-if="tab === 'schedule'" class="list-screen schedule-screen" :class="{ 'schedule-filter-menu-open': timelineMenuOpen }">
         <div v-if="trialBannerText" class="trial-badge" :class="trialBannerClass">{{ trialBannerText }}</div>
         <div class="mf-grid mf-grid-schedule" role="toolbar" aria-label="招生时间轴筛选">
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'identity' }">
             <span class="mf-label">身份</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="targetFilter" :options="targetOptions" @change="onTargetFilterChangeSchedule" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="identity"
+              title="身份"
+              :model-value="targetFilter"
+              :options="targetOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineIdentitySelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'month' }">
             <span class="mf-label">月份</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="monthFilter" :options="monthOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="month"
+              title="月份"
+              :model-value="monthFilter"
+              :options="monthOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineMonthSelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'region' }">
             <span class="mf-label">地区</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleProvinceFilter" :options="provinceOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="region"
+              title="地区"
+              :model-value="scheduleProvinceFilter"
+              :options="provinceOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineRegionSelect"
+            />
           </div>
-          <div class="mf-cell">
+          <div class="mf-cell" :class="{ 'is-menu-open': timelineActiveMenu === 'level' }">
             <span class="mf-label">层级</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleTagFilter" :options="tagOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="level"
+              title="院校层级"
+              :model-value="scheduleTagFilter"
+              :options="tagOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineLevelSelect"
+            />
           </div>
-          <div class="mf-cell mf-cell-wide">
+          <div class="mf-cell mf-cell-wide" :class="{ 'is-menu-open': timelineActiveMenu === 'feature' }">
             <span class="mf-label">特色</span>
-            <van-dropdown-menu class="mf-menu">
-              <van-dropdown-item v-model="scheduleFeatureFilter" :options="featureOptions" @change="loadSchedules" />
-            </van-dropdown-menu>
+            <MobileFilterMenu
+              menu-id="feature"
+              title="特色"
+              :model-value="scheduleFeatureFilter"
+              :options="featureOptions"
+              :active-id="timelineActiveMenu"
+              @update:active-id="onTimelineActiveMenu"
+              @update:model-value="onTimelineFeatureSelect"
+            />
           </div>
         </div>
         <van-empty v-if="!schedules.length" description="暂无招生时间轴数据，可调整筛选或稍后重试" />
@@ -565,7 +631,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showDialog, showFailToast, showLoadingToast, showSuccessToast } from 'vant'
 import html2canvas from 'html2canvas'
 import {
@@ -579,10 +645,15 @@ import {
   syncStudentsAndActive,
 } from './activeStudent'
 import { api } from './api'
+import { isExpiredAuthStatus } from './authToken.js'
 import { getSaasToken, saasApi, setSaasToken } from './saasApi'
 import AuthGate from './AuthGate.vue'
+import PreviewBuildBadge from './PreviewBuildBadge.vue'
 import { normalizeSaasUser } from './authSession.js'
-import { browseUniversities, pinyinInitial, SORT_OPTIONS } from './universityBrowse.js'
+import { mergeEligibilityForm, mapStudentToEligibilityPrefills } from './eligibilityPrefill.js'
+import MobileFilterMenu from './MobileFilterMenu.vue'
+import { IDENTITY_MENU_OPTIONS, SORT_MENU_OPTIONS } from './mobileFilterMenu.js'
+import { browseUniversities, pinyinInitial } from './universityBrowse.js'
 import StudentProfile from './StudentProfile.vue'
 import CscaExamCenter from './CscaExamCenter.vue'
 
@@ -643,9 +714,12 @@ const loginPassword = ref('')
 const saasBusy = ref(false)
 const univSearch = ref('')
 const univSort = ref('recommend')
-const univSortOptions = SORT_OPTIONS
-/** Mobile sort menu: 推荐 / A-Z only (region/tier remain available via existing SORT_OPTIONS helpers if needed). */
-const univSortMenuOptions = SORT_OPTIONS.filter((o) => o.value === 'recommend' || o.value === 'az')
+const univActiveMenu = ref('')
+const univMenuOpen = computed(() => !!univActiveMenu.value)
+const timelineActiveMenu = ref('')
+const timelineMenuOpen = computed(() => !!timelineActiveMenu.value)
+const univIdentityMenuOptions = IDENTITY_MENU_OPTIONS
+const univSortMenuOptions = SORT_MENU_OPTIONS
 const AZ_INDEX_LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '#']
 const azIndexLetters = AZ_INDEX_LETTERS
 const azIndexActive = ref(false)
@@ -667,6 +741,12 @@ const univAzLetters = computed(() => {
 })
 const univAzPresent = computed(() => new Set(univAzLetters.value))
 watch(univSort, () => { ensureUnivSortMenuValue() })
+watch(univActiveMenu, () => { syncUnivMenuBodyClass() })
+watch(timelineActiveMenu, () => { syncTimelineMenuBodyClass() })
+watch(tab, () => {
+  if (univActiveMenu.value) onUnivActiveMenu('')
+  if (timelineActiveMenu.value) onTimelineActiveMenu('')
+})
 
 /** Trial badge copy — always from server entitlement fields (never localStorage/clock). */
 const trialBannerText = computed(() => {
@@ -804,7 +884,7 @@ function onHomePickStudent(payload) {
 const fieldValues = ['综合', '理工', '文史', '医药', '体育', '音乐', '美术', '设计']
 const fieldColumns = fieldValues.map(text => ({ text, value: text }))
 const univFieldOptions = [{ text: '全部领域', value: '' }, ...fieldValues.map(text => ({ text, value: text }))]
-const targetOptions = [{ text: '国际生', value: 'international' }, { text: '华侨生', value: 'huaqiao' }]
+const targetOptions = IDENTITY_MENU_OPTIONS.map((o) => ({ text: o.label, label: o.label, value: o.value }))
 const provinceOptions = ['全部地区','北京','上海','天津','重庆','广东','江苏','浙江','湖北','湖南','陕西','四川','山东','福建','辽宁','吉林','黑龙江','安徽','河南','河北','山西','内蒙古','江西','广西','海南','贵州','云南','西藏','甘肃','青海','宁夏','新疆'].map(text => ({ text, value: text === '全部地区' ? '' : text }))
 const tagOptions = ['全部层级','C9','双一流','985','211'].map(text => ({ text, value: text === '全部层级' ? '' : text }))
 const featureOptions = ['全部特色','体育','音乐','艺术','师范'].map(text => ({ text, value: text === '全部特色' ? '' : text }))
@@ -1043,9 +1123,48 @@ async function onAuthSuccess(user) {
 function onUnivBrowseChange() {
   univBrowseTick.value += 1
 }
+function syncUnivMenuBodyClass() {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('univ-filter-menu-open', !!univActiveMenu.value)
+}
+
+function syncTimelineMenuBodyClass() {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('schedule-filter-menu-open', !!timelineActiveMenu.value)
+}
+
+function onUnivActiveMenu(id) {
+  univActiveMenu.value = id || ''
+  if (univActiveMenu.value) timelineActiveMenu.value = ''
+  syncUnivMenuBodyClass()
+  syncTimelineMenuBodyClass()
+}
+
+function onTimelineActiveMenu(id) {
+  timelineActiveMenu.value = id || ''
+  if (timelineActiveMenu.value) univActiveMenu.value = ''
+  syncTimelineMenuBodyClass()
+  syncUnivMenuBodyClass()
+}
+
 function setUnivSort(v) {
   univSort.value = v
   onUnivBrowseChange()
+}
+
+function onUnivProvinceSelect(v) {
+  provinceFilter.value = v
+  loadUniversities()
+}
+
+function onUnivTagSelect(v) {
+  tagFilter.value = v
+  loadUniversities()
+}
+
+function onUnivFieldSelect(v) {
+  univFieldFilter.value = v
+  loadUniversities()
 }
 function ensureUnivSortMenuValue() {
   const ok = univSortMenuOptions.some((o) => o.value === univSort.value)
@@ -1092,8 +1211,32 @@ function onAzLetterClick(letter) {
 function onUnivListScroll() {
   pulseAzIndex()
 }
-function onUnivTargetDropdown() {
-  setUnivTarget(targetFilter.value)
+function closeUnivFilterMenu() {
+  onUnivActiveMenu('')
+}
+function closeTimelineFilterMenu() {
+  onTimelineActiveMenu('')
+}
+
+function onTimelineIdentitySelect(v) {
+  targetFilter.value = v
+  onTargetFilterChangeSchedule()
+}
+function onTimelineMonthSelect(v) {
+  monthFilter.value = v
+  loadSchedules()
+}
+function onTimelineRegionSelect(v) {
+  scheduleProvinceFilter.value = v
+  loadSchedules()
+}
+function onTimelineLevelSelect(v) {
+  scheduleTagFilter.value = v
+  loadSchedules()
+}
+function onTimelineFeatureSelect(v) {
+  scheduleFeatureFilter.value = v
+  loadSchedules()
 }
 
 async function doSaasLogin() {
@@ -1334,13 +1477,39 @@ function openLawsPolicy() {
   openPage('laws')
 }
 
-function openJudge(type, prefills) {
+async function loadFormalStudentForPrefill() {
+  if (!getSaasToken()) return null
+  let sid = normalizeStudentId(activeStudentId.value)
+  if (!sid) {
+    try {
+      const r = await saasApi.students()
+      syncStudentsAndActive(r.students || [])
+      sid = normalizeStudentId(activeStudentId.value)
+    } catch {
+      return null
+    }
+  }
+  if (!sid) return null
+  try {
+    const student = await saasApi.student(sid)
+    if (normalizeStudentId(activeStudentId.value) !== sid) return null
+    return student
+  } catch {
+    return null
+  }
+}
+
+async function openJudge(type, prefills) {
   eligibilityContext.value = type
   judgeType.value = type
   judgeStep.value = 0
   denationalizationInfo.value = ''
-  form.value = { ...defaultForm(type), ...(prefills || {}) }
+  form.value = mergeEligibilityForm(defaultForm(type), { draft: prefills })
   pushTab('judge')
+  const student = await loadFormalStudentForPrefill()
+  if (!student) return
+  const fromProfile = mapStudentToEligibilityPrefills(student)
+  form.value = mergeEligibilityForm(defaultForm(type), { draft: prefills, profile: fromProfile })
 }
 
 function onGotoJudgeFromProfile(payload) {
@@ -1419,6 +1588,12 @@ async function submitJudge() {
     await loadRecords()
     showSuccessToast('判定完成')
   } catch (error) {
+    if (isExpiredAuthStatus(error?.status)) {
+      setSaasToken('')
+      saasUser.value = null
+      showFailToast(error.message || '请先登录')
+      return
+    }
     showFailToast(error.message)
   } finally {
     toast.close()
@@ -1487,6 +1662,8 @@ async function loadRecords() {
 }
 
 async function onTabChange(name = tab.value) {
+  closeUnivFilterMenu()
+  closeTimelineFilterMenu()
   if (!historyStack.value.includes(name)) historyStack.value.push(name)
   if (name === 'universities' || name === 'schedule') {
     targetFilter.value = eligibilityContext.value
@@ -1535,6 +1712,16 @@ async function saveResultImage() {
     savingImage.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('univ-filter-menu-open')
+    document.body.classList.remove('schedule-filter-menu-open')
+    document.body.classList.remove('native-filter-menu-open')
+    document.body.classList.remove('gq-univ-sort-open')
+    document.body.classList.remove('gq-univ-menu-open')
+  }
+})
 
 onMounted(async () => {
   syncHtmlDark()

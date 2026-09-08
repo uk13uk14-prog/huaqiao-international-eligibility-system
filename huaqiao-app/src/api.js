@@ -1,16 +1,23 @@
+import { buildAuthHeaders, getSaasToken, parseHttpErrorMessage } from './authToken.js'
+
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 async function request(path, options = {}) {
+  const { headers: extraHeaders, ...rest } = options
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options
+    ...rest,
+    headers: buildAuthHeaders(extraHeaders || {}),
   })
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(text || `请求失败：${response.status}`)
+    const err = new Error(parseHttpErrorMessage(response.status, text))
+    err.status = response.status
+    throw err
   }
   return response.json()
 }
+
+export { getSaasToken, buildAuthHeaders, parseHttpErrorMessage }
 
 export const api = {
   judgeHuaqiao: (data) => request('/api/eligibility/huaqiao', { method: 'POST', body: JSON.stringify(data) }),
