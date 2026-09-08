@@ -109,13 +109,10 @@ html.dark body { background: #0b1120; }
 .sticky-actions { position: sticky; bottom: calc(58px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr; gap: 10px; padding: 12px; background: linear-gradient(to top, rgba(238,243,251,.98), rgba(238,243,251,.78)); }
 .dark .sticky-actions { background: linear-gradient(to top, rgba(15,23,42,.98), rgba(15,23,42,.72)); }
 .list-screen .van-search, .list-screen .van-dropdown-menu { position: sticky; top: calc(46px + env(safe-area-inset-top, 0px)); z-index: 4; }
-/* University toolbar is in-flow chrome. Force static so iOS cannot
-   composite search/filter titles over a body-teleported menu or clip card #1. */
+/* University toolbar stays in normal document flow. */
 .list-screen .univ-toolbar .van-search,
-.list-screen .univ-toolbar .van-sticky,
-.list-screen .univ-toolbar .van-dropdown-menu,
-.list-screen .univ-toolbar .van-dropdown-menu__bar,
-.list-screen .univ-toolbar .van-dropdown-menu__title {
+.list-screen .univ-screen .van-search,
+.list-screen .univ-toolbar .van-sticky {
   position: static !important;
   top: auto !important;
   z-index: auto !important;
@@ -243,10 +240,12 @@ html.dark body { background: #0b1120; }
   padding: 6px 8px 4px;
 }
 .dark .mf-cell { background: #0f172a; border-color: #475569; }
+.mf-cell.is-menu-open,
 .mf-cell.is-sort-open {
   border-color: #2563eb;
   background: #ffffff;
 }
+.dark .mf-cell.is-menu-open,
 .dark .mf-cell.is-sort-open { border-color: #60a5fa; background: #0f172a; }
 .mf-cell-wide { grid-column: 1 / -1; }
 .mf-label {
@@ -291,9 +290,9 @@ html.dark body { background: #0b1120; }
 }
 .mf-grid-schedule { margin: 0 0 8px; }
 
-/* Filter UX V2 — toolbar stays in normal flow (not sticky).
-   SortMenu + Vant university dropdowns teleport to body so they are
-   not trapped by univ-screen overflow / former isolation stacking. */
+/* University native filter: toolbar stays in normal flow (not sticky).
+   Active menu teleports to body. When open, underlying filter text and
+   list/AZ are display:none so iOS cannot composite them into the panel. */
 .univ-toolbar {
   position: relative;
   z-index: auto;
@@ -312,30 +311,6 @@ html.dark body { background: #0b1120; }
 .van-dropdown-item {
   z-index: 2000;
 }
-body.gq-univ-sort-open .van-dropdown-item {
-  visibility: hidden !important;
-  pointer-events: none !important;
-  z-index: 0 !important;
-}
-/* Inactive filter cells stay in the toolbar stacking tree and iOS can
-   paint their titles on top of a body-fixed menu. Hide them while any
-   university menu is open so only overlay + active menu remain. */
-body.gq-univ-menu-open .univ-screen .mf-cell:not(.is-menu-open) {
-  visibility: hidden;
-  pointer-events: none;
-}
-body.gq-univ-menu-open .univ-az,
-.univ-screen.has-univ-menu .univ-az,
-.univ-screen.has-sort-menu .univ-az {
-  visibility: hidden;
-  pointer-events: none;
-  opacity: 0;
-}
-body.gq-univ-menu-open .univ-layout,
-.univ-screen.has-univ-menu .univ-layout {
-  pointer-events: none;
-  -webkit-overflow-scrolling: auto;
-}
 .van-dropdown-item__content {
   padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
 }
@@ -352,10 +327,17 @@ body.gq-univ-menu-open .univ-layout,
   flex: none;
   position: relative;
   z-index: auto;
-  padding: 8px 12px 10px;
+  padding: 8px 12px 0;
   background: #e4eaf4;
 }
 .dark .univ-results { background: #0b1120; }
+.univ-list-spacer {
+  flex: none;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
 .univ-layout {
   position: relative;
   z-index: auto;
@@ -367,15 +349,52 @@ body.gq-univ-menu-open .univ-layout,
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: auto;
-  padding-top: 12px;
+  padding-top: 0;
+  margin-top: 0;
 }
 .univ-list {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 0 18px 12px 0;
+  margin: 0;
+}
+
+/* Menu open: stop drawing page/list/AZ and filter inner titles.
+   Keep filter-card boxes for layout so the page does not jump. */
+.univ-filter-menu-open .univ-layout,
+.univ-filter-menu-open .univ-az,
+.univ-filter-menu-open .univ-results,
+.univ-filter-menu-open .univ-list,
+.univ-filter-menu-open .univ-list-spacer,
+body.univ-filter-menu-open .univ-layout,
+body.univ-filter-menu-open .univ-az,
+body.univ-filter-menu-open .univ-results,
+body.univ-filter-menu-open .univ-list,
+body.univ-filter-menu-open .univ-list-spacer {
+  display: none !important;
+  pointer-events: none !important;
+}
+.univ-filter-menu-open .mf-label,
+.univ-filter-menu-open .mfm,
+.univ-filter-menu-open .mfm-trigger,
+body.univ-filter-menu-open .mf-label,
+body.univ-filter-menu-open .mfm,
+body.univ-filter-menu-open .mfm-trigger {
+  display: none !important;
+}
+.univ-filter-menu-open .mf-cell,
+body.univ-filter-menu-open .mf-cell {
+  min-height: 52px;
+  pointer-events: none;
+}
+.univ-filter-menu-open .univ-toolbar,
+.univ-filter-menu-open .mf-grid,
+body.univ-filter-menu-open .univ-toolbar,
+body.univ-filter-menu-open .mf-grid {
+  pointer-events: none;
 }
 .univ-card {
   border: 1px solid rgba(148, 163, 184, 0.32);
@@ -394,8 +413,15 @@ body.gq-univ-menu-open .univ-layout,
   overflow: visible;
   position: relative;
   z-index: auto;
+  flex-shrink: 0;
+  min-height: 22px;
+  margin: 0;
 }
 .univ-card-head b {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  min-height: 1.35em;
   font-size: 15px;
   line-height: 1.35;
   overflow: visible;
@@ -434,12 +460,7 @@ body.gq-univ-menu-open .univ-layout,
   -webkit-overflow-scrolling: auto;
 }
 .univ-az.is-active { opacity: 0.95; }
-.univ-az.is-inert,
-.list-screen.has-sort-menu .univ-az,
-.list-screen.has-sort-menu .univ-layout,
-.list-screen.has-sort-menu .mf-cell:not(.is-sort-open),
-.list-screen.has-sort-menu .univ-toolbar .van-search,
-.list-screen.has-sort-menu .univ-count {
+.univ-az.is-inert {
   pointer-events: none;
 }
 .univ-az-btn,
